@@ -132,6 +132,34 @@ public sealed class WebhookProcessor
     }
 
     /// <summary>
+    /// Processes an incoming webhook event. Validates cryptographic authentication, parses payload,
+    /// verifies idempotency, and dispatches priority ingestion.
+    /// </summary>
+    public Task<WebhookProcessingResult> ProcessEventAsync(
+        string rawJson,
+        string? eventTypeHeader = null,
+        string? signatureHeader = null,
+        string? secretHeader = null,
+        CancellationToken cancellationToken = default) =>
+        ProcessRawJsonAsync(rawJson, eventTypeHeader, signatureHeader, secretHeader, cancellationToken);
+
+    /// <summary>
+    /// Processes a Game Added event. Idempotent by EventId.
+    /// </summary>
+    public Task<WebhookProcessingResult> ProcessEventAsync(
+        GameAddedWebhookPayload payload,
+        CancellationToken cancellationToken = default) =>
+        ProcessGameAddedAsync(payload, cancellationToken);
+
+    /// <summary>
+    /// Processes a Game Updated event. Idempotent by EventId.
+    /// </summary>
+    public Task<WebhookProcessingResult> ProcessEventAsync(
+        GameUpdatedWebhookPayload payload,
+        CancellationToken cancellationToken = default) =>
+        ProcessGameUpdatedAsync(payload, cancellationToken);
+
+    /// <summary>
     /// Processes a raw JSON payload string and routes it to the corresponding event handler.
     /// Verifies cryptographic authentication before processing.
     /// </summary>

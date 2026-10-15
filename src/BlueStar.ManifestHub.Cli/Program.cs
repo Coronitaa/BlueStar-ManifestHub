@@ -1,5 +1,6 @@
 using BlueStar.ManifestHub.Core.Ingestion;
 using BlueStar.ManifestHub.Core.Ingestion.Adapters;
+using BlueStar.ManifestHub.Core.Receiver;
 using BlueStar.ManifestHub.Core.Storage;
 using BlueStar.ManifestHub.Core.Validation;
 
@@ -30,6 +31,56 @@ public static class Program
         };
 
         var pipeline = new IngestionPipeline(adapters, storageManager, validator);
+
+        // Check for server/receiver mode
+        bool isServerMode = args.Any(a => a.Equals("--serve", StringComparison.OrdinalIgnoreCase) ||
+                                          a.Equals("--receiver", StringComparison.OrdinalIgnoreCase));
+        if (isServerMode)
+        {
+            int port = HubReceiverOptions.DefaultPort;
+            string host = "0.0.0.0";
+
+            for (int i = 0; i < args.Length; i++)
+            {
+                if ((args[i].Equals("--port", StringComparison.OrdinalIgnoreCase) || args[i].Equals("-p", StringComparison.OrdinalIgnoreCase)) &&
+                    i + 1 < args.Length && int.TryParse(args[i + 1], out int p))
+                {
+                    port = p;
+                    i++;
+                }
+                else if (args[i].Equals("--host", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                {
+                    host = args[i + 1];
+                    i++;
+                }
+            }
+
+            var ledgerManager = new BlueStar.ManifestHub.Core.Ledger.StardustLedgerManager(new StorageOptions { BasePath = repoRoot });
+            string? webhookSecret = Environment.GetEnvironmentVariable("WEBHOOK_SECRET");
+            var webhookProcessor = new BlueStar.ManifestHub.Core.Webhooks.WebhookProcessor(pipeline, new BlueStar.ManifestHub.Core.Webhooks.WebhookProcessorOptions
+            {
+                SecretKey = webhookSecret,
+                RequireAuthentication = !string.IsNullOrEmpty(webhookSecret)
+            });
+
+            await using var receiverServer = new BlueStar.ManifestHub.Core.Receiver.HubReceiverServer(
+                storageManager,
+                ledgerManager,
+                webhookProcessor,
+                new BlueStar.ManifestHub.Core.Receiver.HubReceiverOptions
+                {
+                    Port = port,
+                    Host = host,
+                    WebhookSecretKey = webhookSecret,
+                    RequireWebhookAuthentication = !string.IsNullOrEmpty(webhookSecret)
+                });
+
+            Console.WriteLine($"[RECEIVER] Starting BlueStar Manifest Hub remote receiver on {host}:{port}...");
+            await receiverServer.StartAsync();
+            Console.WriteLine($"[RECEIVER] Server running at {receiverServer.BaseUrl}. Ready for contributions and webhooks.");
+            await receiverServer.WaitForShutdownAsync();
+            return 0;
+        }
 
         // Bootstrap catalog index if indices/apps.json does not exist
         string appsPath = storageManager.GetAppIndexPath();

@@ -21,6 +21,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\BlueStar.ManifestHub.Core\BlueStar.ManifestHub.Core.csproj" />
   </ItemGroup>
 
