@@ -159,11 +159,12 @@ public sealed class IngestionPipeline
         IngestionBatchSummary summary,
         CancellationToken cancellationToken)
     {
+        var manifestList = manifests as IReadOnlyList<DiscoveredManifest> ?? manifests.ToList();
         var toAcquire = new List<DiscoveredManifest>();
         var affectedDepots = new Dictionary<uint, HashSet<ulong>>();
 
         // 1. Deduplication check against local storage
-        foreach (var m in manifests)
+        foreach (var m in manifestList)
         {
             if (!affectedDepots.TryGetValue(m.DepotId, out var set))
             {
@@ -282,6 +283,194 @@ public sealed class IngestionPipeline
             {
                 await _storageManager.ComputeAndSaveCoverageAsync(parentAppId, depotId, manifestIds, cancellationToken);
             }
+        }
+
+        // 4. Build snapshots and update AppRecords in apps.json
+        await SaveBuildSnapshotsAndAppRecordsAsync(manifestList, defaultAppId, affectedDepots.Keys, cancellationToken);
+    }
+
+    private async Task SaveBuildSnapshotsAndAppRecordsAsync(
+        IReadOnlyList<DiscoveredManifest> manifests,
+        uint defaultAppId,
+        IEnumerable<uint> affectedDepotIds,
+        CancellationToken cancellationToken)
+    {
+        var targetApps = new HashSet<uint>();
+        if (defaultAppId > 0)
+        {
+            targetApps.Add(defaultAppId);
+        }
+        foreach (var m in manifests)
+        {
+            if (m.AppId > 0)
+            {
+                targetApps.Add(m.AppId);
+            }
+        }
+
+        if (targetApps.Count == 0)
+        {
+            foreach (var depotId in affectedDepotIds)
+            {
+                var depotRecord = await _storageManager.GetDepotRecordAsync(depotId, cancellationToken);
+                if (depotRecord != null && depotRecord.AppId > 0)
+                {
+                    targetApps.Add(depotRecord.AppId);
+                }
+            }
+        }
+
+        foreach (uint appId in targetApps)
+        {
+            var appManifests = manifests
+                .Where(m => m.AppId == appId || (m.AppId == 0 && defaultAppId == appId))
+                .ToList();
+
+            if (appManifests.Count == 0 && defaultAppId == appId && manifests.Count > 0)
+            {
+                appManifests = manifests.ToList();
+            }
+
+            if (appManifests.Count == 0)
+            {
+                continue;
+            }
+
+            var existingSnapshots = await _storageManager.GetBuildSnapshotsAsync(appId, cancellationToken);
+
+            // 1. Determine BuildId: from discovered manifest if present, else incremental
+            ulong buildId;
+            var discoveredBuild = appManifests.FirstOrDefault(m => m.BuildId.HasValue && m.BuildId.Value > 0);
+            if (discoveredBuild?.BuildId != null)
+            {
+                buildId = discoveredBuild.BuildId.Value;
+            }
+            else
+            {
+                buildId = existingSnapshots.Count > 0
+                    ? existingSnapshots.Max(s => s.BuildId) + 1
+                    : 1UL;
+            }
+
+            // 2. Determine Branch
+            string branch = appManifests.FirstOrDefault(m => !string.IsNullOrWhiteSpace(m.Branch))?.Branch ?? "public";
+
+            // 3. Determine DepotManifests (mapping DepotId -> ManifestId)
+            var depotManifests = new Dictionary<uint, ulong>();
+            var latestSnapshot = existingSnapshots.FirstOrDefault();
+            if (latestSnapshot?.DepotManifests != null)
+            {
+                foreach (var (k, v) in latestSnapshot.DepotManifests)
+                {
+                    depotManifests[k] = v;
+                }
+            }
+
+            var existingApp = await _storageManager.GetAppRecordAsync(appId, cancellationToken);
+            if (existingApp?.DepotIds != null)
+            {
+                foreach (uint dId in existingApp.DepotIds)
+                {
+                    if (!depotManifests.ContainsKey(dId))
+                    {
+                        var dRec = await _storageManager.GetDepotRecordAsync(dId, cancellationToken);
+                        if (dRec?.LatestManifestId.HasValue == true)
+                        {
+                            depotManifests[dId] = dRec.LatestManifestId.Value;
+                        }
+                    }
+                }
+            }
+
+            // Group app manifests by DepotId
+            foreach (var group in appManifests.GroupBy(m => m.DepotId))
+            {
+                uint depotId = group.Key;
+                if (depotId == 0) continue;
+
+                DiscoveredManifest chosen = group.First();
+                DateTimeOffset? bestTimestamp = null;
+
+                foreach (var m in group)
+                {
+                    DateTimeOffset? candidateTimestamp = m.CreationTime;
+                    if (!candidateTimestamp.HasValue)
+                    {
+                        var rev = await _storageManager.GetManifestRevisionAsync(depotId, m.ManifestId, cancellationToken);
+                        candidateTimestamp = rev?.CreationTime;
+                    }
+
+                    if (candidateTimestamp.HasValue)
+                    {
+                        if (bestTimestamp == null || candidateTimestamp.Value > bestTimestamp.Value)
+                        {
+                            bestTimestamp = candidateTimestamp.Value;
+                            chosen = m;
+                        }
+                    }
+                    else if (bestTimestamp == null)
+                    {
+                        // Preserve stream order without numerical GID comparison
+                        chosen = m;
+                    }
+                }
+
+                depotManifests[depotId] = chosen.ManifestId;
+            }
+
+            // 4. Determine Timestamp: authentic timestamp if available, else UTC now
+            DateTimeOffset? authenticTimestamp = null;
+            foreach (var (depotId, manifestId) in depotManifests)
+            {
+                var rev = await _storageManager.GetManifestRevisionAsync(depotId, manifestId, cancellationToken);
+                if (rev?.CreationTime.HasValue == true)
+                {
+                    if (authenticTimestamp == null || rev.CreationTime.Value > authenticTimestamp.Value)
+                    {
+                        authenticTimestamp = rev.CreationTime.Value;
+                    }
+                }
+            }
+
+            DateTimeOffset snapshotTimestamp = authenticTimestamp ?? DateTimeOffset.UtcNow;
+
+            // 5. Save BuildSnapshot
+            var snapshot = new BuildSnapshot
+            {
+                AppId = appId,
+                BuildId = buildId,
+                Timestamp = snapshotTimestamp,
+                Branch = branch,
+                Description = $"Build snapshot {buildId} for App {appId} ({branch})",
+                DepotManifests = depotManifests
+            };
+
+            await _storageManager.SaveBuildSnapshotAsync(snapshot, cancellationToken);
+
+            // 6. Update AppRecord in indices/apps.json
+            var allDepotIds = new HashSet<uint>(existingApp?.DepotIds ?? Array.Empty<uint>());
+            foreach (var d in depotManifests.Keys)
+            {
+                allDepotIds.Add(d);
+            }
+            foreach (var m in appManifests)
+            {
+                if (m.DepotId > 0)
+                {
+                    allDepotIds.Add(m.DepotId);
+                }
+            }
+
+            var updatedApp = new AppRecord
+            {
+                AppId = appId,
+                Name = !string.IsNullOrWhiteSpace(existingApp?.Name) ? existingApp.Name : $"App {appId}",
+                DepotIds = allDepotIds.OrderBy(id => id).ToList(),
+                LastUpdated = DateTimeOffset.UtcNow,
+                Metadata = existingApp?.Metadata ?? new Dictionary<string, string>()
+            };
+
+            await _storageManager.UpdateAppRecordAsync(updatedApp, cancellationToken);
         }
     }
 }

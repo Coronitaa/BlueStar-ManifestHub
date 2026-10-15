@@ -146,7 +146,7 @@ public sealed class ManifestStorageManager
                 {
                     DepotId = depotId,
                     ManifestId = manifestId,
-                    CreationTime = validation.CreationTime,
+                    CreationTime = validation.AuthenticCreationTime,
                     SizeOriginal = validation.SizeOriginal,
                     SizeCompressed = validation.SizeCompressed,
                     Sha256 = validation.Sha256,
@@ -192,7 +192,7 @@ public sealed class ManifestStorageManager
         {
             DepotId = depotId,
             ManifestId = manifestId,
-            CreationTime = validation.CreationTime,
+            CreationTime = validation.AuthenticCreationTime,
             SizeOriginal = validation.SizeOriginal,
             SizeCompressed = validation.SizeCompressed,
             Sha256 = validation.Sha256,
@@ -412,13 +412,23 @@ public sealed class ManifestStorageManager
         int total = knownManifestIds.Count;
         int available = 0;
         ulong? latestAvailable = null;
+        DateTimeOffset? latestAuthenticTime = null;
 
         foreach (ulong id in knownManifestIds)
         {
             if (ManifestExists(depotId, id))
             {
                 available++;
-                if (latestAvailable == null || id > latestAvailable.Value)
+                var rev = await GetManifestRevisionAsync(depotId, id, cancellationToken);
+                if (rev?.CreationTime.HasValue == true)
+                {
+                    if (latestAuthenticTime == null || rev.CreationTime.Value >= latestAuthenticTime.Value)
+                    {
+                        latestAuthenticTime = rev.CreationTime.Value;
+                        latestAvailable = id;
+                    }
+                }
+                else if (latestAuthenticTime == null)
                 {
                     latestAvailable = id;
                 }
@@ -479,10 +489,9 @@ public sealed class ManifestStorageManager
             if (!manifestList.Contains(manifestId))
             {
                 manifestList.Add(manifestId);
-                manifestList.Sort();
             }
 
-            ulong latest = manifestList.Count > 0 ? manifestList[^1] : manifestId;
+            ulong latest = manifestId;
 
             depots[key] = new DepotRecord
             {
@@ -525,7 +534,10 @@ public sealed class ManifestStorageManager
         }
     }
 
-    public async Task RegisterAppAsync(AppRecord app, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Updates or registers an application record in indices/apps.json, merging depot IDs and updating LastUpdated.
+    /// </summary>
+    public async Task UpdateAppRecordAsync(AppRecord app, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(app);
         string appIndexPath = GetAppIndexPath();
@@ -544,7 +556,41 @@ public sealed class ManifestStorageManager
                 }
             }
 
-            apps[app.AppId.ToString()] = app;
+            string key = app.AppId.ToString();
+            if (apps.TryGetValue(key, out var existingRecord))
+            {
+                var mergedDepots = new HashSet<uint>(existingRecord.DepotIds ?? Array.Empty<uint>());
+                if (app.DepotIds != null)
+                {
+                    foreach (var d in app.DepotIds)
+                    {
+                        mergedDepots.Add(d);
+                    }
+                }
+
+                var mergedMetadata = new Dictionary<string, string>(existingRecord.Metadata ?? new Dictionary<string, string>());
+                if (app.Metadata != null)
+                {
+                    foreach (var (k, v) in app.Metadata)
+                    {
+                        mergedMetadata[k] = v;
+                    }
+                }
+
+                apps[key] = new AppRecord
+                {
+                    AppId = app.AppId,
+                    Name = !string.IsNullOrWhiteSpace(app.Name) ? app.Name : existingRecord.Name,
+                    DepotIds = mergedDepots.OrderBy(id => id).ToList(),
+                    LastUpdated = app.LastUpdated != default ? app.LastUpdated : DateTimeOffset.UtcNow,
+                    Metadata = mergedMetadata
+                };
+            }
+            else
+            {
+                apps[key] = app;
+            }
+
             await File.WriteAllTextAsync(appIndexPath, HubJsonSerializer.Serialize(apps), cancellationToken);
         }
         finally
@@ -552,6 +598,9 @@ public sealed class ManifestStorageManager
             _indexLock.Release();
         }
     }
+
+    public Task RegisterAppAsync(AppRecord app, CancellationToken cancellationToken = default) =>
+        UpdateAppRecordAsync(app, cancellationToken);
 
     public async Task<AppRecord?> GetAppRecordAsync(uint appId, CancellationToken cancellationToken = default)
     {
@@ -574,6 +623,42 @@ public sealed class ManifestStorageManager
         {
             _indexLock.Release();
         }
+    }
+
+    /// <summary>
+    /// Default population of base applications for bootstrapping the catalog index.
+    /// </summary>
+    public static readonly IReadOnlyList<AppRecord> DefaultBaseApps = new List<AppRecord>
+    {
+        new() { AppId = 730, Name = "Counter-Strike 2", DepotIds = new[] { 731u, 732u } },
+        new() { AppId = 570, Name = "Dota 2", DepotIds = new[] { 570u } },
+        new() { AppId = 440, Name = "Team Fortress 2", DepotIds = new[] { 441u } },
+        new() { AppId = 105600, Name = "Terraria", DepotIds = new[] { 105601u } }
+    };
+
+    /// <summary>
+    /// Initializes the catalog apps.json index with base seed applications if the index file does not exist.
+    /// Returns the number of seeded applications registered.
+    /// </summary>
+    public async Task<int> BootstrapAppIndexIfMissingAsync(
+        IEnumerable<AppRecord>? seedApps = null,
+        CancellationToken cancellationToken = default)
+    {
+        string appIndexPath = GetAppIndexPath();
+        if (File.Exists(appIndexPath))
+        {
+            return 0;
+        }
+
+        var apps = seedApps ?? DefaultBaseApps;
+        int count = 0;
+        foreach (var app in apps)
+        {
+            await RegisterAppAsync(app, cancellationToken);
+            count++;
+        }
+
+        return count;
     }
 
     #endregion

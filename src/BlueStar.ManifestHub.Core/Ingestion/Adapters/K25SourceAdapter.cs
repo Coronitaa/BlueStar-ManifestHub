@@ -87,6 +87,9 @@ public sealed class K25SourceAdapter : IManifestSourceAdapter, IDisposable
     {
         ThrowIfDisposed();
 
+        if (appId == 0)
+            return Array.Empty<DiscoveredManifest>();
+
         if (!IsAvailable)
             return Array.Empty<DiscoveredManifest>();
 
@@ -121,6 +124,9 @@ public sealed class K25SourceAdapter : IManifestSourceAdapter, IDisposable
     {
         ThrowIfDisposed();
 
+        if (depotId == 0)
+            return Array.Empty<DiscoveredManifest>();
+
         if (!IsAvailable)
             return Array.Empty<DiscoveredManifest>();
 
@@ -154,6 +160,9 @@ public sealed class K25SourceAdapter : IManifestSourceAdapter, IDisposable
     public async Task<byte[]?> DownloadManifestAsync(uint depotId, ulong manifestId, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
+
+        if (depotId == 0 || manifestId == 0)
+            return null;
 
         if (!IsAvailable)
             return null;
@@ -192,8 +201,27 @@ public sealed class K25SourceAdapter : IManifestSourceAdapter, IDisposable
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
+            if (root.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in root.EnumerateArray())
+                {
+                    if (TryParseManifestEntry(item, out ulong mId, out uint? itemDepotId, out string? sha256, out DateTimeOffset? timestamp))
+                    {
+                        uint effectiveDepotId = itemDepotId.HasValue && itemDepotId.Value > 0 ? itemDepotId.Value : defaultDepotId;
+                        list.Add(new DiscoveredManifest
+                        {
+                            AppId = defaultAppId,
+                            DepotId = effectiveDepotId,
+                            ManifestId = mId,
+                            ExpectedSha256 = sha256,
+                            CreationTime = timestamp,
+                            SourceId = SourceId
+                        });
+                    }
+                }
+            }
             // Handle object format with "manifests" array or depot mapping
-            if (root.TryGetProperty("manifests", out var manifestsElement) && manifestsElement.ValueKind == JsonValueKind.Array)
+            else if (root.TryGetProperty("manifests", out var manifestsElement) && manifestsElement.ValueKind == JsonValueKind.Array)
             {
                 uint appId = root.TryGetProperty("appId", out var aProp) && aProp.TryGetUInt32(out uint aId) ? aId : defaultAppId;
                 uint depotId = root.TryGetProperty("depotId", out var dProp) && dProp.TryGetUInt32(out uint dId) ? dId : defaultDepotId;

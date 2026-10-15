@@ -24,12 +24,40 @@ public static class Program
         string? apiKey = Environment.GetEnvironmentVariable("DEPOTBOX_API_KEY");
         var adapters = new List<IManifestSourceAdapter>
         {
-            new DepotBoxSourceAdapter(rateGovernor, new DepotBoxOptions { ApiKey = apiKey }),
+            new DepotBoxSourceAdapter(rateGovernor, new DepotBoxOptions { ApiKey = apiKey, AllowBulkIngestion = false }),
             new ManifestHub2SourceAdapter(),
             new K25SourceAdapter()
         };
 
         var pipeline = new IngestionPipeline(adapters, storageManager, validator);
+
+        // Bootstrap catalog index if indices/apps.json does not exist
+        string appsPath = storageManager.GetAppIndexPath();
+        if (!File.Exists(appsPath))
+        {
+            Console.WriteLine($"[BOOTSTRAP] Catalog index not found at '{appsPath}'. Initializing base seed population...");
+            string seedPath = Path.Combine(repoRoot, "seeds", "apps.json");
+            IEnumerable<BlueStar.ManifestHub.Core.Models.AppRecord>? seeds = null;
+            if (File.Exists(seedPath))
+            {
+                try
+                {
+                    string seedJson = await File.ReadAllTextAsync(seedPath);
+                    var dict = BlueStar.ManifestHub.Core.Serialization.HubJsonSerializer.Deserialize<Dictionary<string, BlueStar.ManifestHub.Core.Models.AppRecord>>(seedJson);
+                    if (dict != null && dict.Count > 0)
+                    {
+                        seeds = dict.Values;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[WARN] Could not parse seed file at {seedPath}: {ex.Message}");
+                }
+            }
+
+            int count = await storageManager.BootstrapAppIndexIfMissingAsync(seeds);
+            Console.WriteLine($"[BOOTSTRAP] Successfully bootstrapped catalog index with {count} base applications.");
+        }
 
         var appIdsToIngest = new List<uint>();
         for (int i = 0; i < args.Length; i++)
@@ -44,7 +72,6 @@ public static class Program
         if (appIdsToIngest.Count == 0)
         {
             // By default or --ingest-all: check apps in catalog index if available
-            string appsPath = storageManager.GetAppIndexPath();
             if (File.Exists(appsPath))
             {
                 Console.WriteLine($"Reading apps from catalog index: {appsPath}");
@@ -62,6 +89,12 @@ public static class Program
                     Console.WriteLine($"[WARN] Could not parse catalog index at {appsPath}: {ex.Message}");
                 }
             }
+        }
+
+        if (appIdsToIngest.Count == 0)
+        {
+            Console.Error.WriteLine("[ERROR] No applications found or specified to process. Aborting with exit code 1.");
+            return 1;
         }
 
         Console.WriteLine($"Ingesting manifests for {appIdsToIngest.Count} applications...");

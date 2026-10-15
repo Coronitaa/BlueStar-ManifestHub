@@ -27,6 +27,7 @@ public sealed class DepotBoxOptions
     public int MaxRetries { get; set; } = 3;
     public int CircuitBreakerFailureThreshold { get; set; } = 5;
     public TimeSpan CircuitBreakerOpenDuration { get; set; } = TimeSpan.FromSeconds(30);
+    public bool AllowBulkIngestion { get; set; } = false;
 }
 
 /// <summary>
@@ -76,6 +77,7 @@ public sealed class DepotBoxSourceAdapter : IManifestSourceAdapter, IDisposable
     public string SourceId => "DepotBox";
     public string SourceType => "DepotBoxApi";
     public int Priority => _options.Priority;
+    public bool AllowBulkIngestion => _options.AllowBulkIngestion;
 
     public CircuitBreakerState CircuitState
     {
@@ -106,6 +108,17 @@ public sealed class DepotBoxSourceAdapter : IManifestSourceAdapter, IDisposable
     {
         ThrowIfDisposed();
 
+        if (appId == 0)
+        {
+            return Array.Empty<DiscoveredManifest>();
+        }
+
+        if (!_options.AllowBulkIngestion)
+        {
+            // Protect DepotBox provider from unconstrained bulk discovery and rate exhaustion
+            return Array.Empty<DiscoveredManifest>();
+        }
+
         string url = $"{_options.BaseUrl.TrimEnd('/')}/api/apps/{appId}/manifests";
         using var response = await ExecuteWithPolicyAsync(() => new HttpRequestMessage(HttpMethod.Get, url), cancellationToken);
 
@@ -123,6 +136,11 @@ public sealed class DepotBoxSourceAdapter : IManifestSourceAdapter, IDisposable
     {
         ThrowIfDisposed();
 
+        if (depotId == 0)
+        {
+            return Array.Empty<DiscoveredManifest>();
+        }
+
         string url = $"{_options.BaseUrl.TrimEnd('/')}/api/depots/{depotId}/manifests";
         using var response = await ExecuteWithPolicyAsync(() => new HttpRequestMessage(HttpMethod.Get, url), cancellationToken);
 
@@ -139,6 +157,11 @@ public sealed class DepotBoxSourceAdapter : IManifestSourceAdapter, IDisposable
     public async Task<byte[]?> DownloadManifestAsync(uint depotId, ulong manifestId, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
+
+        if (depotId == 0 || manifestId == 0)
+        {
+            return null;
+        }
 
         string url = $"{_options.BaseUrl.TrimEnd('/')}/api/depots/{depotId}/manifests/{manifestId}";
         using var response = await ExecuteWithPolicyAsync(() => new HttpRequestMessage(HttpMethod.Get, url), cancellationToken);
@@ -181,6 +204,10 @@ public sealed class DepotBoxSourceAdapter : IManifestSourceAdapter, IDisposable
             try
             {
                 using var request = requestFactory();
+                if (!string.IsNullOrWhiteSpace(_options.ApiKey) && request.Headers.Authorization == null)
+                {
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
+                }
                 var response = await _httpClient.SendAsync(request, cancellationToken);
 
                 // Check for 429 Too Many Requests
@@ -224,6 +251,10 @@ public sealed class DepotBoxSourceAdapter : IManifestSourceAdapter, IDisposable
                 {
                     RecordSuccess();
                     await _rateGovernor.ReportSuccessAsync(cancellationToken);
+                }
+                else if (response.StatusCode == HttpStatusCode.NotFound)
+                {
+                    // 404 Not Found indicates manifest absence on this provider, not a circuit failure
                 }
                 else
                 {

@@ -129,4 +129,36 @@ public class StorageManagerTests : IDisposable
         Assert.NotNull(revision);
         Assert.Equal(ManifestValidator.ComputeSha256(bytes2), revision.Sha256);
     }
+
+    [Fact]
+    public async Task BootstrapAppIndexIfMissingAsync_InitializesCatalogWithBaseApps()
+    {
+        string appIndexPath = _storage.GetAppIndexPath();
+        Assert.False(File.Exists(appIndexPath));
+
+        int bootstrapped = await _storage.BootstrapAppIndexIfMissingAsync();
+        Assert.Equal(4, bootstrapped);
+        Assert.True(File.Exists(appIndexPath));
+
+        var cs2 = await _storage.GetAppRecordAsync(730);
+        Assert.NotNull(cs2);
+        Assert.Equal("Counter-Strike 2", cs2.Name);
+        Assert.Contains(731u, cs2.DepotIds);
+
+        var dota = await _storage.GetAppRecordAsync(570);
+        Assert.NotNull(dota);
+        Assert.Equal("Dota 2", dota.Name);
+
+        var tf2 = await _storage.GetAppRecordAsync(440);
+        Assert.NotNull(tf2);
+        Assert.Equal("Team Fortress 2", tf2.Name);
+
+        var terraria = await _storage.GetAppRecordAsync(105600);
+        Assert.NotNull(terraria);
+        Assert.Equal("Terraria", terraria.Name);
+
+        // Calling again when already exists should be idempotent and return 0
+        int secondRun = await _storage.BootstrapAppIndexIfMissingAsync();
+        Assert.Equal(0, secondRun);
+    }
 }

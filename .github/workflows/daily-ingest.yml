@@ -8,7 +8,9 @@ on:
       app_ids:
         description: 'Optional comma-separated AppIDs to sync (leave empty for all tracked apps)'
         required: false
-        default: ''
+concurrency:
+  group: bluestar-manifest-hub-ingest
+  cancel-in-progress: false
 
 permissions:
   contents: write

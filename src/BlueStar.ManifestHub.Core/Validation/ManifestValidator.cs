@@ -187,15 +187,17 @@ public sealed class ManifestValidator
         }
 
         // 5. Extract timestamp with fallback
-        DateTimeOffset timestamp;
+        DateTimeOffset? authenticTimestamp = null;
         if (extractedMeta != null && extractedMeta.CreationTimeUnix > 0)
         {
-            timestamp = DateTimeOffset.FromUnixTimeSeconds(extractedMeta.CreationTimeUnix);
+            authenticTimestamp = DateTimeOffset.FromUnixTimeSeconds(extractedMeta.CreationTimeUnix);
         }
-        else
+        else if (fallbackTimestamp.HasValue)
         {
-            timestamp = fallbackTimestamp ?? DateTimeOffset.UtcNow;
+            authenticTimestamp = fallbackTimestamp.Value;
         }
+
+        DateTimeOffset timestamp = authenticTimestamp ?? DateTimeOffset.UtcNow;
 
         long originalSize = extractedMeta?.DiskOriginalSize > 0 
             ? (long)extractedMeta.DiskOriginalSize 
@@ -213,7 +215,8 @@ public sealed class ManifestValidator
             sha1,
             originalSize,
             compressedSize,
-            decompressedPayload);
+            decompressedPayload,
+            authenticCreationTime: authenticTimestamp);
     }
 
     /// <summary>

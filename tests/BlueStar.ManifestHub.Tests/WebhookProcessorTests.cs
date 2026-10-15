@@ -272,4 +272,141 @@ public sealed class WebhookProcessorTests : IDisposable
             }
         }
     }
+
+    [Fact]
+    public async Task ProcessRawJson_WithValidHmacSha256Signature_Succeeds()
+    {
+        string secret = "test_super_secret_key_123456";
+        var processor = new WebhookProcessor(options: new WebhookProcessorOptions
+        {
+            ProcessedEventsFilePath = _stateFilePath,
+            SecretKey = secret,
+            RequireAuthentication = true
+        });
+
+        string json = """
+        {
+            "eventId": "evt_auth_hmac_01",
+            "eventType": "game.added",
+            "appId": 730,
+            "name": "Counter-Strike 2"
+        }
+        """;
+
+        string signature = WebhookProcessor.ComputeHmacSha256(json, secret);
+        string headerWithPrefix = $"sha256={signature}";
+
+        var result = await processor.ProcessRawJsonAsync(json, signatureHeader: headerWithPrefix);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("evt_auth_hmac_01", result.EventId);
+        Assert.True(await processor.IsEventProcessedAsync("evt_auth_hmac_01"));
+    }
+
+    [Fact]
+    public async Task ProcessRawJson_WithValidXWebhookSecretHeader_Succeeds()
+    {
+        string secret = "test_webhook_header_secret_789";
+        var processor = new WebhookProcessor(options: new WebhookProcessorOptions
+        {
+            ProcessedEventsFilePath = _stateFilePath,
+            SecretKey = secret,
+            RequireAuthentication = true
+        });
+
+        string json = """
+        {
+            "eventId": "evt_auth_secret_01",
+            "eventType": "game.updated",
+            "appId": 440,
+            "updatedDepots": [ { "depotId": 441, "manifestId": 112233 } ]
+        }
+        """;
+
+        var result = await processor.ProcessRawJsonAsync(json, secretHeader: secret);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("evt_auth_secret_01", result.EventId);
+        Assert.True(await processor.IsEventProcessedAsync("evt_auth_secret_01"));
+    }
+
+    [Fact]
+    public async Task ProcessRawJson_WithInvalidHmacSignature_FailsAuthentication()
+    {
+        string secret = "valid_secret_key";
+        var processor = new WebhookProcessor(options: new WebhookProcessorOptions
+        {
+            ProcessedEventsFilePath = _stateFilePath,
+            SecretKey = secret,
+            RequireAuthentication = true
+        });
+
+        string json = """
+        {
+            "eventId": "evt_tampered_01",
+            "eventType": "game.added",
+            "appId": 730,
+            "name": "Counter-Strike 2"
+        }
+        """;
+
+        string badSignature = "sha256=0000000000000000000000000000000000000000000000000000000000000000";
+
+        var result = await processor.ProcessRawJsonAsync(json, signatureHeader: badSignature);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains("Authentication failed", result.Message);
+        Assert.False(await processor.IsEventProcessedAsync("evt_tampered_01"));
+    }
+
+    [Fact]
+    public async Task ProcessRawJson_WithInvalidSecretHeader_FailsAuthentication()
+    {
+        var processor = new WebhookProcessor(options: new WebhookProcessorOptions
+        {
+            ProcessedEventsFilePath = _stateFilePath,
+            SecretKey = "expected_secret",
+            RequireAuthentication = true
+        });
+
+        string json = """
+        {
+            "eventId": "evt_bad_secret_01",
+            "eventType": "game.added",
+            "appId": 730,
+            "name": "Counter-Strike 2"
+        }
+        """;
+
+        var result = await processor.ProcessRawJsonAsync(json, secretHeader: "wrong_secret");
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains("Authentication failed", result.Message);
+        Assert.False(await processor.IsEventProcessedAsync("evt_bad_secret_01"));
+    }
+
+    [Fact]
+    public async Task ProcessRawJson_WhenSecretConfigured_MissingAuth_FailsAuthentication()
+    {
+        var processor = new WebhookProcessor(options: new WebhookProcessorOptions
+        {
+            ProcessedEventsFilePath = _stateFilePath,
+            SecretKey = "configured_secret"
+        });
+
+        string json = """
+        {
+            "eventId": "evt_missing_auth_01",
+            "eventType": "game.added",
+            "appId": 730,
+            "name": "Counter-Strike 2"
+        }
+        """;
+
+        var result = await processor.ProcessRawJsonAsync(json);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains("Authentication failed", result.Message);
+        Assert.False(await processor.IsEventProcessedAsync("evt_missing_auth_01"));
+    }
 }

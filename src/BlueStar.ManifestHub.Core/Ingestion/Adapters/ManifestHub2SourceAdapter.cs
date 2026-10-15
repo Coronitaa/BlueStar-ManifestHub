@@ -86,6 +86,9 @@ public sealed class ManifestHub2SourceAdapter : IManifestSourceAdapter, IDisposa
     {
         ThrowIfDisposed();
 
+        if (appId == 0)
+            return Array.Empty<DiscoveredManifest>();
+
         if (!IsAvailable)
             return Array.Empty<DiscoveredManifest>();
 
@@ -126,6 +129,9 @@ public sealed class ManifestHub2SourceAdapter : IManifestSourceAdapter, IDisposa
     public async Task<byte[]?> DownloadManifestAsync(uint depotId, ulong manifestId, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
+
+        if (depotId == 0 || manifestId == 0)
+            return null;
 
         if (!IsAvailable)
             return null;
@@ -184,6 +190,28 @@ public sealed class ManifestHub2SourceAdapter : IManifestSourceAdapter, IDisposa
                         {
                             ExtractManifestsFromElement(list, appId, depotId, item);
                         }
+                    }
+                }
+            }
+            else if (root.ValueKind == JsonValueKind.Object)
+            {
+                // Root is a direct depot map e.g. { "731": { ... } } or { "731": [ ... ] }
+                foreach (var prop in root.EnumerateObject())
+                {
+                    if (uint.TryParse(prop.Name, out uint depotId))
+                    {
+                        ExtractManifestsFromElement(list, appId, depotId, prop.Value);
+                    }
+                }
+            }
+            else if (root.ValueKind == JsonValueKind.Array)
+            {
+                // Root is an array of depots
+                foreach (var item in root.EnumerateArray())
+                {
+                    if (item.TryGetProperty("depotId", out var dIdElem) && dIdElem.TryGetUInt32(out uint depotId))
+                    {
+                        ExtractManifestsFromElement(list, appId, depotId, item);
                     }
                 }
             }

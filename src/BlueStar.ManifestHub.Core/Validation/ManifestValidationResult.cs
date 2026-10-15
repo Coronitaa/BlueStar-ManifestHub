@@ -14,6 +14,8 @@ public sealed class ManifestValidationResult
     public uint DepotId { get; init; }
     public ulong ManifestId { get; init; }
     public DateTimeOffset CreationTime { get; init; }
+    public DateTimeOffset? AuthenticCreationTime { get; init; }
+    public bool HasAuthenticCreationTime => AuthenticCreationTime.HasValue;
 
     public string Sha256 { get; init; } = string.Empty;
     public string Sha1 { get; init; } = string.Empty;
@@ -32,7 +34,8 @@ public sealed class ManifestValidationResult
         string sha1,
         long sizeOriginal,
         long sizeCompressed,
-        byte[]? decompressedPayload = null) =>
+        byte[]? decompressedPayload = null,
+        DateTimeOffset? authenticCreationTime = null) =>
         new()
         {
             IsValid = true,
@@ -40,6 +43,7 @@ public sealed class ManifestValidationResult
             DepotId = depotId,
             ManifestId = manifestId,
             CreationTime = creationTime,
+            AuthenticCreationTime = authenticCreationTime,
             Sha256 = sha256,
             Sha1 = sha1,
             SizeOriginal = sizeOriginal,

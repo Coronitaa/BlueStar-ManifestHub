@@ -1,0 +1,43 @@
+{
+  "730": {
+    "schemaVersion": "v1",
+    "appId": 730,
+    "name": "Counter-Strike 2",
+    "depotIds": [
+      731,
+      732
+    ],
+    "lastUpdated": "2026-10-15T20:23:49.175016+00:00",
+    "metadata": {}
+  },
+  "570": {
+    "schemaVersion": "v1",
+    "appId": 570,
+    "name": "Dota 2",
+    "depotIds": [
+      570
+    ],
+    "lastUpdated": "2026-10-15T20:23:49.175081+00:00",
+    "metadata": {}
+  },
+  "440": {
+    "schemaVersion": "v1",
+    "appId": 440,
+    "name": "Team Fortress 2",
+    "depotIds": [
+      441
+    ],
+    "lastUpdated": "2026-10-15T20:23:49.1750866+00:00",
+    "metadata": {}
+  },
+  "105600": {
+    "schemaVersion": "v1",
+    "appId": 105600,
+    "name": "Terraria",
+    "depotIds": [
+      105601
+    ],
+    "lastUpdated": "2026-10-15T20:23:49.1750869+00:00",
+    "metadata": {}
+  }
+}

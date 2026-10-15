@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using BlueStar.ManifestHub.Core.Ingestion;
 using BlueStar.ManifestHub.Core.Ingestion.Adapters;
@@ -13,6 +15,16 @@ public sealed class WebhookProcessorOptions
         Path.Combine(Path.GetTempPath(), "bluestar_processed_webhooks.json");
 
     public int MaxRetainedEventIds { get; set; } = 10_000;
+
+    /// <summary>
+    /// Shared secret key used to verify incoming webhook payloads (via HMAC-SHA256 signature or X-Webhook-Secret header).
+    /// </summary>
+    public string? SecretKey { get; set; }
+
+    /// <summary>
+    /// When true, incoming payloads must provide a valid cryptographic signature or secret header.
+    /// </summary>
+    public bool RequireAuthentication { get; set; }
 }
 
 /// <summary>
@@ -37,16 +49,111 @@ public sealed class WebhookProcessor
     }
 
     /// <summary>
+    /// Helper to compute HMAC-SHA256 signature formatted as lowercase hex string.
+    /// </summary>
+    public static string ComputeHmacSha256(string payload, string secret)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+        ArgumentNullException.ThrowIfNull(secret);
+
+        byte[] secretBytes = Encoding.UTF8.GetBytes(secret);
+        byte[] payloadBytes = Encoding.UTF8.GetBytes(payload);
+
+        using var hmac = new HMACSHA256(secretBytes);
+        byte[] hash = hmac.ComputeHash(payloadBytes);
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Verifies the cryptographic authentication of the incoming payload against the configured secret key.
+    /// Checks HMAC-SHA256 signatures (e.g. X-Hub-Signature-256) and secure secret headers (e.g. X-Webhook-Secret).
+    /// Uses constant-time equality comparisons to prevent timing side-channel attacks.
+    /// </summary>
+    public bool ValidateAuthentication(string rawPayload, string? signatureHeader, string? secretHeader)
+    {
+        // If authentication is not required and no SecretKey is configured, permit unauthenticated payloads
+        if (string.IsNullOrEmpty(_options.SecretKey) && !_options.RequireAuthentication)
+        {
+            return true;
+        }
+
+        // If authentication is requested or SecretKey is configured, but secret is empty
+        if (string.IsNullOrEmpty(_options.SecretKey))
+        {
+            return false;
+        }
+
+        // 1. Check HMAC-SHA256 signature
+        if (!string.IsNullOrWhiteSpace(signatureHeader))
+        {
+            string cleanSig = signatureHeader.Trim();
+            if (cleanSig.StartsWith("sha256=", StringComparison.OrdinalIgnoreCase))
+            {
+                cleanSig = cleanSig["sha256=".Length..].Trim();
+            }
+            else if (cleanSig.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
+            {
+                cleanSig = cleanSig["sha256:".Length..].Trim();
+            }
+
+            try
+            {
+                byte[] providedSigBytes = Convert.FromHexString(cleanSig);
+                byte[] secretBytes = Encoding.UTF8.GetBytes(_options.SecretKey);
+                byte[] payloadBytes = Encoding.UTF8.GetBytes(rawPayload);
+
+                using var hmac = new HMACSHA256(secretBytes);
+                byte[] expectedHashBytes = hmac.ComputeHash(payloadBytes);
+
+                if (CryptographicOperations.FixedTimeEquals(expectedHashBytes, providedSigBytes))
+                {
+                    return true;
+                }
+            }
+            catch (FormatException)
+            {
+                // Invalid hex format in signature
+            }
+        }
+
+        // 2. Check X-Webhook-Secret header
+        if (!string.IsNullOrWhiteSpace(secretHeader))
+        {
+            byte[] providedSecretBytes = Encoding.UTF8.GetBytes(secretHeader.Trim());
+            byte[] expectedSecretBytes = Encoding.UTF8.GetBytes(_options.SecretKey);
+
+            if (CryptographicOperations.FixedTimeEquals(expectedSecretBytes, providedSecretBytes))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Processes a raw JSON payload string and routes it to the corresponding event handler.
+    /// Verifies cryptographic authentication before processing.
     /// </summary>
     public async Task<WebhookProcessingResult> ProcessRawJsonAsync(
         string rawJson,
         string? eventTypeHeader = null,
+        string? signatureHeader = null,
+        string? secretHeader = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(rawJson))
         {
             return WebhookProcessingResult.Failure(string.Empty, eventTypeHeader, "Payload body is empty.");
+        }
+
+        // Cryptographic authentication verification
+        if (!ValidateAuthentication(rawJson, signatureHeader, secretHeader))
+        {
+            return WebhookProcessingResult.Failure(
+                string.Empty,
+                eventTypeHeader,
+                "Authentication failed: invalid or missing cryptographic signature / secret header.");
         }
 
         JsonDocument doc;

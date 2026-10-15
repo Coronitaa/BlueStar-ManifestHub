@@ -16,6 +16,12 @@ public sealed class DiscoveredManifest
     [JsonPropertyName("manifestId")]
     public ulong ManifestId { get; init; }
 
+    [JsonPropertyName("buildId")]
+    public ulong? BuildId { get; init; }
+
+    [JsonPropertyName("branch")]
+    public string? Branch { get; init; }
+
     [JsonPropertyName("expectedSha256")]
     public string? ExpectedSha256 { get; init; }
 
