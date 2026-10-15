@@ -1,0 +1,431 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.bluestar.hub/v1/manifest-hub.schema.json",
+  "title": "BlueStar Manifest Hub Schema v1",
+  "description": "JSON Schema specification for BlueStar Manifest Hub data structures, records, snapshots, and ledger entries.",
+  "type": "object",
+  "definitions": {
+    "ManifestStatus": {
+      "type": "string",
+      "description": "Status of a depot manifest revision in the hub.",
+      "enum": [
+        "AvailableAndValidated",
+        "Pending",
+        "Missing",
+        "Corrupted",
+        "Inaccessible",
+        "Restricted",
+        "Superseded",
+        "Unverified"
+      ]
+    },
+    "AppRecord": {
+      "type": "object",
+      "description": "Record representing an application tracked by the Manifest Hub.",
+      "required": ["schemaVersion", "appId", "name", "depotIds", "lastUpdated"],
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "const": "v1"
+        },
+        "appId": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Steam Application ID (AppID)."
+        },
+        "name": {
+          "type": "string",
+          "description": "Display name of the application."
+        },
+        "depotIds": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "description": "List of associated depot IDs."
+        },
+        "lastUpdated": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of the last metadata update."
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Key-value metadata dictionary."
+        }
+      }
+    },
+    "DepotRecord": {
+      "type": "object",
+      "description": "Record representing a depot associated with an application.",
+      "required": ["schemaVersion", "depotId", "appId", "name", "manifestIds", "lastUpdated"],
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "const": "v1"
+        },
+        "depotId": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Steam Depot ID."
+        },
+        "appId": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Parent Steam Application ID."
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the depot."
+        },
+        "latestManifestId": {
+          "type": ["integer", "null"],
+          "description": "Most recent manifest ID (GID)."
+        },
+        "manifestIds": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "Known manifest IDs for this depot."
+        },
+        "lastUpdated": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "ManifestRevision": {
+      "type": "object",
+      "description": "Record representing a specific revision of a depot manifest.",
+      "required": [
+        "schemaVersion",
+        "depotId",
+        "manifestId",
+        "sizeOriginal",
+        "sizeCompressed",
+        "sha256",
+        "sha1",
+        "status",
+        "ingestedAt",
+        "source",
+        "contributorPseudonym"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "const": "v1"
+        },
+        "depotId": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "manifestId": {
+          "type": "integer"
+        },
+        "creationTime": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        },
+        "sizeOriginal": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sizeCompressed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "sha1": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$"
+        },
+        "status": {
+          "$ref": "#/definitions/ManifestStatus"
+        },
+        "ingestedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "source": {
+          "type": "string"
+        },
+        "contributorPseudonym": {
+          "type": "string",
+          "description": "Anonymous pseudonym or token. Never a SteamID."
+        }
+      }
+    },
+    "BuildSnapshot": {
+      "type": "object",
+      "description": "Snapshot representing an application build mapping at a point in time.",
+      "required": ["schemaVersion", "appId", "buildId", "timestamp", "branch", "depotManifests"],
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "const": "v1"
+        },
+        "appId": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "buildId": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "branch": {
+          "type": "string",
+          "default": "public"
+        },
+        "description": {
+          "type": "string"
+        },
+        "depotManifests": {
+          "type": "object",
+          "description": "Map of DepotId to ManifestId.",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "DepotChangeEvent": {
+      "type": "object",
+      "description": "Event triggered when a depot manifest update is detected.",
+      "required": ["schemaVersion", "eventId", "depotId", "newManifestId", "detectedAt", "source"],
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "const": "v1"
+        },
+        "eventId": {
+          "type": "string"
+        },
+        "depotId": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "appId": {
+          "type": ["integer", "null"]
+        },
+        "previousManifestId": {
+          "type": ["integer", "null"]
+        },
+        "newManifestId": {
+          "type": "integer"
+        },
+        "detectedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "source": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "SourceRecord": {
+      "type": "object",
+      "description": "Record representing an ingestion source or provider.",
+      "required": ["schemaVersion", "sourceId", "name", "sourceType", "isActive", "priority", "lastSync"],
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "const": "v1"
+        },
+        "sourceId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "sourceType": {
+          "type": "string"
+        },
+        "isActive": {
+          "type": "boolean"
+        },
+        "priority": {
+          "type": "integer"
+        },
+        "lastSync": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "config": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "CoverageRecord": {
+      "type": "object",
+      "description": "Coverage statistics for an application or depot.",
+      "required": [
+        "schemaVersion",
+        "appId",
+        "depotId",
+        "totalRevisions",
+        "availableRevisions",
+        "missingRevisions",
+        "coverageRatio",
+        "lastChecked"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "const": "v1"
+        },
+        "appId": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "depotId": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "totalRevisions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "availableRevisions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "missingRevisions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "coverageRatio": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "latestAvailableManifestId": {
+          "type": ["integer", "null"]
+        },
+        "lastChecked": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "ContributionRecord": {
+      "type": "object",
+      "description": "Record tracking an anonymous community contribution.",
+      "required": [
+        "schemaVersion",
+        "contributionId",
+        "contributorPseudonym",
+        "depotId",
+        "manifestId",
+        "submittedAt",
+        "validationStatus",
+        "stardustPointsAwarded"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "const": "v1"
+        },
+        "contributionId": {
+          "type": "string"
+        },
+        "contributorPseudonym": {
+          "type": "string",
+          "description": "Anonymous pseudonym or token. Never a SteamID."
+        },
+        "depotId": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "manifestId": {
+          "type": "integer"
+        },
+        "submittedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "validationStatus": {
+          "$ref": "#/definitions/ManifestStatus"
+        },
+        "stardustPointsAwarded": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "StardustLedgerEntry": {
+      "type": "object",
+      "description": "Immutable ledger entry recording Stardust points earned by anonymous contributors.",
+      "required": [
+        "schemaVersion",
+        "transactionId",
+        "contributorPseudonym",
+        "artifactKey",
+        "points",
+        "reason",
+        "timestamp",
+        "previousHash",
+        "entryHash"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "const": "v1"
+        },
+        "transactionId": {
+          "type": "string"
+        },
+        "contributorPseudonym": {
+          "type": "string",
+          "description": "Pseudonymous identity of contributor. SteamID is strictly forbidden."
+        },
+        "artifactKey": {
+          "type": "string",
+          "pattern": "^manifest:\\d+:\\d+$"
+        },
+        "points": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "reason": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "previousHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "entryHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    }
+  }
+}

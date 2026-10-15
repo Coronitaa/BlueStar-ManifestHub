@@ -1,0 +1,61 @@
+name: Daily Ingestion & Snapshot Publication
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      app_ids:
+        description: 'Optional comma-separated AppIDs to sync (leave empty for all tracked apps)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  ingest:
+    name: Sync Sources & Publish Batches
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Run Ingestion Tool
+        env:
+          DEPOTBOX_API_KEY: ${{ secrets.DEPOTBOX_API_KEY }}
+          APP_IDS: ${{ github.event.inputs.app_ids }}
+        run: |
+          if [ -n "$APP_IDS" ]; then
+            IFS=',' read -ra ADDR <<< "$APP_IDS"
+            ARGS=""
+            for id in "${ADDR[@]}"; do
+              ARGS="$ARGS --app $id"
+            done
+            dotnet run --project src/BlueStar.ManifestHub.Cli -- $ARGS
+          else
+            dotnet run --project src/BlueStar.ManifestHub.Cli -- --ingest-all
+          fi
+
+      - name: Commit and push batch publications
+        run: |
+          git config user.name "stardust-bot"
+          git config user.email "bot@bluestar.hub"
+          git add manifests/ snapshots/ indices/ builds/ ledger/
+          if git diff --staged --quiet; then
+            echo "No changes detected to commit."
+          else
+            git commit -m "chore(hub): daily ingestion synchronization and batch snapshot update [skip ci]"
+            git push origin HEAD:${{ github.ref }}
+          fi

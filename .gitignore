@@ -1,0 +1,10 @@
+bin/
+obj/
+*.user
+*.suo
+.vs/
+TestResults/
+*.lock
+*.tmp*
+staging/
+logs/
