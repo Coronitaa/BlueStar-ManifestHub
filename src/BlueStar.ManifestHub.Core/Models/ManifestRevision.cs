@@ -42,4 +42,20 @@ public sealed class ManifestRevision
 
     [JsonPropertyName("contributorPseudonym")]
     public string ContributorPseudonym { get; init; } = "anonymous";
+
+    /// <summary>
+    /// Display date string for UI/CLI presentation. Displays "Fecha desconocida" / "Unknown date" when no authentic date exists.
+    /// </summary>
+    [JsonIgnore]
+    public string DisplayDate => CreationTime.HasValue
+        ? CreationTime.Value.ToString("yyyy-MM-dd HH:mm:ss 'UTC'")
+        : "Unknown date";
+
+    [JsonIgnore]
+    public string DisplayDateEs => CreationTime.HasValue
+        ? CreationTime.Value.ToString("yyyy-MM-dd HH:mm:ss 'UTC'")
+        : "Fecha desconocida";
+
+    public string GetDisplayDate(string lang = "en") =>
+        lang.StartsWith("es", StringComparison.OrdinalIgnoreCase) ? DisplayDateEs : DisplayDate;
 }

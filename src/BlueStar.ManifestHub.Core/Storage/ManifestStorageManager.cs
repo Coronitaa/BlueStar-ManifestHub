@@ -311,6 +311,47 @@ public sealed class ManifestStorageManager
         return snapshots.FirstOrDefault();
     }
 
+    /// <summary>
+    /// Selects a complete build snapshot by its authentic date and retrieves all depot revisions belonging to that snapshot.
+    /// </summary>
+    public async Task<(BuildSnapshot? Snapshot, IReadOnlyDictionary<uint, ManifestRevision> Revisions)> GetSnapshotByAuthenticDateAsync(
+        uint appId,
+        DateTimeOffset authenticDate,
+        CancellationToken cancellationToken = default)
+    {
+        var snapshots = await GetBuildSnapshotsAsync(appId, cancellationToken);
+        var snapshot = snapshots.FirstOrDefault(s => s.CreationTime.HasValue &&
+            Math.Abs((s.CreationTime.Value - authenticDate).TotalSeconds) < 2.0);
+
+        if (snapshot == null)
+        {
+            return (null, new Dictionary<uint, ManifestRevision>());
+        }
+
+        var revisions = new Dictionary<uint, ManifestRevision>();
+        foreach (var (depotId, manifestId) in snapshot.DepotManifests)
+        {
+            var rev = await GetManifestRevisionAsync(depotId, manifestId, cancellationToken);
+            if (rev != null)
+            {
+                revisions[depotId] = rev;
+            }
+        }
+
+        return (snapshot, revisions);
+    }
+
+    /// <summary>
+    /// Gets all complete build snapshots for an application that have authentic creation dates.
+    /// </summary>
+    public async Task<IReadOnlyList<BuildSnapshot>> GetAuthenticBuildSnapshotsAsync(
+        uint appId,
+        CancellationToken cancellationToken = default)
+    {
+        var snapshots = await GetBuildSnapshotsAsync(appId, cancellationToken);
+        return snapshots.Where(s => s.CreationTime.HasValue).ToList();
+    }
+
     #endregion
 
     #region Coverage Records

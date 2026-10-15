@@ -203,7 +203,15 @@ public sealed class IngestionPipeline
                     byte[]? bytes = null;
                     try
                     {
-                        bytes = await adapter.DownloadManifestAsync(m.DepotId, m.ManifestId, cancellationToken);
+                        uint effectiveAppId = m.AppId > 0 ? m.AppId : defaultAppId;
+                        if (adapter is ManifestHub2SourceAdapter mh2 && effectiveAppId > 0)
+                        {
+                            bytes = await mh2.DownloadManifestAsync(effectiveAppId, m.DepotId, m.ManifestId, cancellationToken);
+                        }
+                        else
+                        {
+                            bytes = await adapter.DownloadManifestAsync(m.DepotId, m.ManifestId, cancellationToken);
+                        }
                     }
                     catch (Exception ex)
                     {

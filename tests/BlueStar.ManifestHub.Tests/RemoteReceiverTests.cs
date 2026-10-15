@@ -204,6 +204,7 @@ public sealed class RemoteReceiverTests : IAsyncLifetime
         Assert.NotNull(secondReceipt);
         Assert.True(secondReceipt.IsSuccess);
         Assert.True(secondReceipt.IsDuplicate);
+        Assert.Equal("Duplicate", secondReceipt.Status);
         Assert.Equal(0, secondReceipt.StardustCredited); // 0 points on duplicate!
 
         // Balance must strictly remain 100
@@ -502,5 +503,382 @@ public sealed class RemoteReceiverTests : IAsyncLifetime
         Assert.NotNull(apps);
         Assert.True(apps.Count >= 4);
         Assert.True(apps.ContainsKey("730"));
+    }
+
+    [Fact]
+    public async Task RateLimiting_ExceedsRequestThreshold_Returns429TooManyRequests()
+    {
+        var customDir = TestManifestHelper.CreateTestDirectory("ratelimit_test_");
+        try
+        {
+            var stOptions = new StorageOptions { BasePath = customDir };
+            var storage = new ManifestStorageManager(stOptions);
+            var ledger = new StardustLedgerManager(stOptions);
+            var webhook = new WebhookProcessor();
+
+            var options = new HubReceiverOptions
+            {
+                Port = 0,
+                Host = "127.0.0.1",
+                MaxRequestsPerMinutePerIp = 5,
+                MaxContributionsPerMinutePerContributor = 3
+            };
+
+            await using var server = new HubReceiverServer(storage, ledger, webhook, options);
+            await server.StartAsync();
+
+            using var client = new HttpClient { BaseAddress = new Uri(server.BaseUrl) };
+
+            HttpResponseMessage? lastResponse = null;
+            // Send requests exceeding contributor threshold (MaxContributionsPerMinutePerContributor = 3)
+            for (int i = 0; i < 5; i++)
+            {
+                ulong manifestId = 1000000UL + (ulong)i;
+                byte[] bytes = TestManifestHelper.CreateValidManifest(731, manifestId);
+                var submission = new ContributionSubmission
+                {
+                    AnonymousContributorId = "anon_rate_test",
+                    AppId = 730,
+                    DepotId = 731,
+                    ManifestId = manifestId,
+                    PayloadBase64 = Convert.ToBase64String(bytes)
+                };
+
+                lastResponse = await client.PostAsJsonAsync("/api/v1/contributions/publish", submission);
+            }
+
+            Assert.NotNull(lastResponse);
+            Assert.Equal(HttpStatusCode.TooManyRequests, lastResponse.StatusCode);
+            Assert.True(lastResponse.Headers.Contains("Retry-After"));
+        }
+        finally
+        {
+            TestManifestHelper.CleanupTestDirectory(customDir);
+        }
+    }
+
+    [Fact]
+    public async Task PublishContribution_ExceedsMaxPayloadSizeBytes_Returns413PayloadTooLarge()
+    {
+        var customDir = TestManifestHelper.CreateTestDirectory("payload_limit_test_");
+        try
+        {
+            var stOptions = new StorageOptions { BasePath = customDir };
+            var storage = new ManifestStorageManager(stOptions);
+            var ledger = new StardustLedgerManager(stOptions);
+            var webhook = new WebhookProcessor();
+
+            var options = new HubReceiverOptions
+            {
+                Port = 0,
+                Host = "127.0.0.1",
+                MaxPayloadSizeBytes = 1024 // 1 KB limit for testing
+            };
+
+            await using var server = new HubReceiverServer(storage, ledger, webhook, options);
+            await server.StartAsync();
+
+            using var client = new HttpClient { BaseAddress = new Uri(server.BaseUrl) };
+
+            // Generate payload exceeding 1024 bytes
+            byte[] largeData = new byte[2048];
+            Array.Fill<byte>(largeData, 0x5A);
+            byte[] bytes = TestManifestHelper.CreateValidManifest(731, 2000000UL, payload: Encoding.UTF8.GetString(largeData), compress: false);
+
+            var submission = new ContributionSubmission
+            {
+                AnonymousContributorId = "anon_large_payload",
+                AppId = 730,
+                DepotId = 731,
+                ManifestId = 2000000UL,
+                PayloadBase64 = Convert.ToBase64String(bytes)
+            };
+
+            var response = await client.PostAsJsonAsync("/api/v1/contributions/publish", submission);
+            Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+        }
+        finally
+        {
+            TestManifestHelper.CleanupTestDirectory(customDir);
+        }
+    }
+
+    [Fact]
+    public async Task ReplayProtection_SameManifestByDifferentContributors_SecondAwardsZeroStardustAndDuplicateStatus()
+    {
+        uint appId = 730;
+        uint depotId = 731;
+        ulong manifestId = 333444555UL;
+        byte[] manifestBytes = TestManifestHelper.CreateValidManifest(depotId, manifestId);
+        string sha256 = Convert.ToHexString(SHA256.HashData(manifestBytes)).ToLowerInvariant();
+        string base64 = Convert.ToBase64String(manifestBytes);
+
+        var sub1 = new ContributionSubmission
+        {
+            AnonymousContributorId = "anon_contributor_first",
+            AppId = appId,
+            DepotId = depotId,
+            ManifestId = manifestId,
+            ManifestHashSha256 = sha256,
+            PayloadBase64 = base64
+        };
+
+        var sub2 = new ContributionSubmission
+        {
+            AnonymousContributorId = "anon_contributor_second",
+            AppId = appId,
+            DepotId = depotId,
+            ManifestId = manifestId,
+            ManifestHashSha256 = sha256,
+            PayloadBase64 = base64
+        };
+
+        // First submission by contributor 1
+        var resp1 = await _client.PostAsJsonAsync("/api/v1/contributions/publish", sub1);
+        Assert.Equal(HttpStatusCode.OK, resp1.StatusCode);
+        var receipt1 = await resp1.Content.ReadFromJsonAsync<PublicationReceipt>();
+        Assert.NotNull(receipt1);
+        Assert.Equal("Published", receipt1.Status);
+        Assert.Equal(100, receipt1.StardustCredited);
+        Assert.False(receipt1.IsDuplicate);
+
+        int balance1 = await _ledgerManager.GetContributorBalanceAsync("anon_contributor_first");
+        Assert.Equal(100, balance1);
+
+        // Second submission of the same manifest by contributor 2 (replay / duplicate)
+        var resp2 = await _client.PostAsJsonAsync("/api/v1/contributions/publish", sub2);
+        Assert.Equal(HttpStatusCode.OK, resp2.StatusCode);
+        var receipt2 = await resp2.Content.ReadFromJsonAsync<PublicationReceipt>();
+        Assert.NotNull(receipt2);
+        Assert.True(receipt2.IsSuccess);
+        Assert.Equal("Duplicate", receipt2.Status);
+        Assert.True(receipt2.IsDuplicate);
+        Assert.Equal(0, receipt2.StardustCredited);
+
+        int balance2 = await _ledgerManager.GetContributorBalanceAsync("anon_contributor_second");
+        Assert.Equal(0, balance2);
+
+        // Total ledger entries must remain exactly 1 for this artifact
+        var entries = await _ledgerManager.ReadAllEntriesAsync();
+        var artifactEntries = entries.Where(e => e.ArtifactKey == $"manifest:{depotId}:{manifestId}").ToList();
+        Assert.Single(artifactEntries);
+    }
+
+    [Fact]
+    public async Task Concurrency_TenConcurrentSubmissions_MaintainsLedgerConsistencyAndZeroCorruption()
+    {
+        uint appId = 730;
+        uint depotId = 731;
+        string contributor = "anon_concurrency_tester";
+
+        var tasks = new Task<HttpResponseMessage>[10];
+        for (int i = 0; i < 10; i++)
+        {
+            ulong manifestId = 5000000UL + (ulong)i;
+            byte[] manifestBytes = TestManifestHelper.CreateValidManifest(depotId, manifestId);
+            string sha256 = Convert.ToHexString(SHA256.HashData(manifestBytes)).ToLowerInvariant();
+
+            var submission = new ContributionSubmission
+            {
+                AnonymousContributorId = contributor,
+                AppId = appId,
+                DepotId = depotId,
+                ManifestId = manifestId,
+                ManifestHashSha256 = sha256,
+                PayloadBase64 = Convert.ToBase64String(manifestBytes)
+            };
+
+            tasks[i] = Task.Run(async () =>
+            {
+                using var client = new HttpClient { BaseAddress = new Uri(_server.BaseUrl) };
+                return await client.PostAsJsonAsync("/api/v1/contributions/publish", submission);
+            });
+        }
+
+        var responses = await Task.WhenAll(tasks);
+        foreach (var resp in responses)
+        {
+            Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+            var receipt = await resp.Content.ReadFromJsonAsync<PublicationReceipt>();
+            Assert.NotNull(receipt);
+            Assert.True(receipt.IsSuccess);
+        }
+
+        // Contributor balance must be exactly 10 * 100 = 1000
+        int balance = await _ledgerManager.GetContributorBalanceAsync(contributor);
+        Assert.Equal(1000, balance);
+
+        // Verify ledger integrity (cryptographic hash chaining)
+        var integrityResult = await _ledgerManager.VerifyIntegrityAsync();
+        Assert.True(integrityResult.IsValid, "Stardust ledger hash chain must be strictly valid with zero corruption.");
+
+        var entries = await _ledgerManager.ReadAllEntriesAsync();
+        var contributorEntries = entries.Where(e => e.ContributorPseudonym == contributor).ToList();
+        Assert.Equal(10, contributorEntries.Count);
+    }
+
+    [Fact]
+    public async Task Concurrency_ConcurrentDuplicatesOfSameManifest_OnlyOneAwardsPoints()
+    {
+        uint appId = 730;
+        uint depotId = 731;
+        ulong manifestId = 6000000UL;
+        byte[] manifestBytes = TestManifestHelper.CreateValidManifest(depotId, manifestId);
+        string sha256 = Convert.ToHexString(SHA256.HashData(manifestBytes)).ToLowerInvariant();
+        string base64 = Convert.ToBase64String(manifestBytes);
+
+        var tasks = new Task<PublicationReceipt?>[10];
+        for (int i = 0; i < 10; i++)
+        {
+            string contributor = $"anon_concurrent_racer_{i}";
+            var submission = new ContributionSubmission
+            {
+                AnonymousContributorId = contributor,
+                AppId = appId,
+                DepotId = depotId,
+                ManifestId = manifestId,
+                ManifestHashSha256 = sha256,
+                PayloadBase64 = base64
+            };
+
+            tasks[i] = Task.Run(async () =>
+            {
+                using var client = new HttpClient { BaseAddress = new Uri(_server.BaseUrl) };
+                var resp = await client.PostAsJsonAsync("/api/v1/contributions/publish", submission);
+                Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+                return await resp.Content.ReadFromJsonAsync<PublicationReceipt>();
+            });
+        }
+
+        var receipts = await Task.WhenAll(tasks);
+        int publishedCount = receipts.Count(r => r != null && r.Status == "Published" && r.StardustCredited == 100 && !r.IsDuplicate);
+        int duplicateCount = receipts.Count(r => r != null && r.Status == "Duplicate" && r.StardustCredited == 0 && r.IsDuplicate);
+
+        Assert.Equal(1, publishedCount);
+        Assert.Equal(9, duplicateCount);
+
+        var integrityResult = await _ledgerManager.VerifyIntegrityAsync();
+        Assert.True(integrityResult.IsValid);
+    }
+
+    [Fact]
+    public async Task PartialFailure_InvalidManifestData_NoStardustCreditGrantedAndReturnsError()
+    {
+        string contributor = "anon_invalid_partial";
+        var submission = new ContributionSubmission
+        {
+            AnonymousContributorId = contributor,
+            AppId = 730,
+            DepotId = 731,
+            ManifestId = 7000001UL,
+            PayloadBase64 = Convert.ToBase64String(new byte[] { 0x01, 0x02, 0x03, 0x04 }) // Invalid magic header
+        };
+
+        var response = await _client.PostAsJsonAsync("/api/v1/contributions/publish", submission);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        // Verify zero Stardust credited
+        int balance = await _ledgerManager.GetContributorBalanceAsync(contributor);
+        Assert.Equal(0, balance);
+
+        // Verify ledger has zero entries for this contributor
+        var entries = await _ledgerManager.ReadAllEntriesAsync();
+        Assert.DoesNotContain(entries, e => e.ContributorPseudonym == contributor);
+    }
+
+    [Fact]
+    public async Task PartialFailure_DiskError_NoStardustCreditGrantedAndReturns500Error()
+    {
+        uint depotId = 731;
+        ulong manifestId = 7000002UL;
+        string contributor = "anon_disk_error_tester";
+
+        // Block manifest file creation by creating a directory with the same name as the target manifest file
+        string manifestPath = _storageManager.GetManifestPath(depotId, manifestId);
+        Directory.CreateDirectory(manifestPath);
+
+        try
+        {
+            byte[] bytes = TestManifestHelper.CreateValidManifest(depotId, manifestId);
+            var submission = new ContributionSubmission
+            {
+                AnonymousContributorId = contributor,
+                AppId = 730,
+                DepotId = depotId,
+                ManifestId = manifestId,
+                PayloadBase64 = Convert.ToBase64String(bytes)
+            };
+
+            var response = await _client.PostAsJsonAsync("/api/v1/contributions/publish", submission);
+            Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+
+            // Verify zero Stardust credited
+            int balance = await _ledgerManager.GetContributorBalanceAsync(contributor);
+            Assert.Equal(0, balance);
+
+            // Verify ledger has zero entries for this contributor
+            var entries = await _ledgerManager.ReadAllEntriesAsync();
+            Assert.DoesNotContain(entries, e => e.ContributorPseudonym == contributor);
+        }
+        finally
+        {
+            if (Directory.Exists(manifestPath))
+            {
+                Directory.Delete(manifestPath);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task PublishContribution_UnknownDate_CreationTimeIsNullAndDoesNotCopyExistingTimestamp()
+    {
+        uint appId = 730;
+        var existingTimestamp = new DateTimeOffset(2025, 6, 15, 12, 0, 0, TimeSpan.Zero);
+
+        // 1. Submit first manifest with known authentic timestamp
+        byte[] manifest1 = TestManifestHelper.CreateValidManifest(731, 8000001UL, timestamp: existingTimestamp);
+        var sub1 = new ContributionSubmission
+        {
+            AnonymousContributorId = "anon_date_tester_1",
+            AppId = appId,
+            DepotId = 731,
+            ManifestId = 8000001UL,
+            PayloadBase64 = Convert.ToBase64String(manifest1)
+        };
+        var resp1 = await _client.PostAsJsonAsync("/api/v1/contributions/publish", sub1);
+        Assert.Equal(HttpStatusCode.OK, resp1.StatusCode);
+
+        // 2. Submit second manifest with UNKNOWN date (includeMetadata: false)
+        byte[] manifest2 = TestManifestHelper.CreateValidManifest(732, 8000002UL, timestamp: null, includeMetadata: false);
+        var sub2 = new ContributionSubmission
+        {
+            AnonymousContributorId = "anon_date_tester_2",
+            AppId = appId,
+            DepotId = 732,
+            ManifestId = 8000002UL,
+            PayloadBase64 = Convert.ToBase64String(manifest2)
+        };
+        var resp2 = await _client.PostAsJsonAsync("/api/v1/contributions/publish", sub2);
+        Assert.Equal(HttpStatusCode.OK, resp2.StatusCode);
+
+        // 3. Inspect build snapshots for App 730
+        var snapshots = await _storageManager.GetBuildSnapshotsAsync(appId);
+        Assert.Equal(2, snapshots.Count);
+
+        // Find snapshot for manifest2 (BuildId 2)
+        var secondSnapshot = snapshots.FirstOrDefault(s => s.BuildId == 2);
+        Assert.NotNull(secondSnapshot);
+
+        // Auditor Finding 4 verification:
+        // Assert CreationTime is strictly null (not fabricated)
+        Assert.Null(secondSnapshot.CreationTime);
+
+        // Assert Timestamp was NOT copied from snapshot 1
+        Assert.NotEqual(existingTimestamp, secondSnapshot.Timestamp);
+        Assert.Equal(DateTimeOffset.UnixEpoch, secondSnapshot.Timestamp);
+
+        // Assert it did not fabricate a complete build by copying depot 731
+        Assert.False(secondSnapshot.DepotManifests.ContainsKey(731));
+        Assert.True(secondSnapshot.DepotManifests.ContainsKey(732));
     }
 }

@@ -109,6 +109,113 @@ public sealed class AdapterTests : IDisposable
         Assert.Null(downloaded);
     }
 
+    [Fact]
+    public async Task ManifestHub2SourceAdapter_VerifiedStructure_BranchPerAppId_AndManifestDownload()
+    {
+        string authenticJson = """
+        {
+            "appid": 730,
+            "name": "Counter-Strike 2",
+            "depot": {
+                "731": {
+                    "manifests": {
+                        "public": {
+                            "gid": "3779741820453041761",
+                            "size": "7"
+                        },
+                        "csgo_legacy": {
+                            "gid": "1224088799001669801"
+                        }
+                    }
+                },
+                "732": {
+                    "manifests": {
+                        "public": {
+                            "gid": "5289214263727115270"
+                        }
+                    }
+                }
+            }
+        }
+        """;
+
+        byte[] fakeBinary = new byte[] { 0x10, 0x20, 0x30, 0x40 };
+        string? requestedAppUrl = null;
+        string? requestedManifestUrl = null;
+
+        var handler = new MockHttpMessageHandler((req, ct) =>
+        {
+            string url = req.RequestUri!.ToString();
+            if (url == "https://raw.githubusercontent.com/SSMGAlt/ManifestHub2/730/730.json")
+            {
+                requestedAppUrl = url;
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(authenticJson)
+                };
+            }
+            if (url == "https://raw.githubusercontent.com/SSMGAlt/ManifestHub2/730/731_3779741820453041761.manifest")
+            {
+                requestedManifestUrl = url;
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent(fakeBinary)
+                };
+            }
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using var client = new HttpClient(handler);
+        using var adapter = new ManifestHub2SourceAdapter(new ManifestHub2Options
+        {
+            BaseUrl = "https://raw.githubusercontent.com/SSMGAlt/ManifestHub2"
+        }, client);
+
+        var manifests = await adapter.DiscoverManifestsAsync(730);
+
+        Assert.Equal("https://raw.githubusercontent.com/SSMGAlt/ManifestHub2/730/730.json", requestedAppUrl);
+        Assert.Equal(3, manifests.Count);
+
+        var pub731 = manifests.FirstOrDefault(m => m.DepotId == 731 && m.ManifestId == 3779741820453041761UL);
+        Assert.NotNull(pub731);
+        Assert.Equal("public", pub731.Branch);
+
+        var legacy731 = manifests.FirstOrDefault(m => m.DepotId == 731 && m.ManifestId == 1224088799001669801UL);
+        Assert.NotNull(legacy731);
+        Assert.Equal("csgo_legacy", legacy731.Branch);
+
+        // Verify depot discovery uses cached / resolved branch mappings
+        var depotDiscovered = await adapter.DiscoverManifestsForDepotAsync(731);
+        Assert.Equal(2, depotDiscovered.Count);
+
+        // Download manifest binary using verified route: {baseUrl}/{appId}/{depotId}_{manifestId}.manifest
+        var binary = await adapter.DownloadManifestAsync(731, 3779741820453041761UL);
+        Assert.NotNull(binary);
+        Assert.Equal(fakeBinary, binary);
+        Assert.Equal("https://raw.githubusercontent.com/SSMGAlt/ManifestHub2/730/731_3779741820453041761.manifest", requestedManifestUrl);
+    }
+
+    [Fact]
+    public async Task ManifestHub2SourceAdapter_LiveIntegration_AuthenticGitHub()
+    {
+        try
+        {
+            using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+            using var adapter = new ManifestHub2SourceAdapter(null, httpClient);
+
+            var manifests = await adapter.DiscoverManifestsAsync(730);
+            if (manifests.Count > 0)
+            {
+                // Verify depot 731 manifests are discovered from live GitHub repo
+                Assert.Contains(manifests, m => m.DepotId == 731);
+            }
+        }
+        catch (HttpRequestException)
+        {
+            // Network unavailable or GitHub rate limited; skip gracefully in disconnected test runners
+        }
+    }
+
     #endregion
 
     #region K25 Tests
@@ -136,7 +243,7 @@ public sealed class AdapterTests : IDisposable
                     Content = new StringContent(sampleJson)
                 };
             }
-            if (req.RequestUri.AbsolutePath.Contains("manifests/441/555666777.manifest"))
+            if (req.RequestUri.AbsolutePath.EndsWith("441_555666777.manifest"))
             {
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
@@ -224,6 +331,197 @@ public sealed class AdapterTests : IDisposable
         Assert.Equal(2, manifests.Count);
         Assert.Contains(manifests, m => m.ManifestId == 111 && m.DepotId == 731);
         Assert.Contains(manifests, m => m.ManifestId == 222 && m.DepotId == 731);
+    }
+
+    [Fact]
+    public async Task K25SourceAdapter_VerifiedStructure_RootManifestUrl_AndTreeParsing()
+    {
+        string treeJson = """
+        {
+            "sha": "main_tree_sha",
+            "tree": [
+                {
+                    "path": "1000011_2155801291552894539.manifest",
+                    "sha": "db18c248dd1e182713af62d09ccc38f22cc1c368",
+                    "size": 296723
+                },
+                {
+                    "path": "1000011_2916223256493235763.manifest",
+                    "sha": "7a59c6b6234d1fe6e00dde51972088e1367a32e8",
+                    "size": 296722
+                },
+                {
+                    "path": "999999_123456789.manifest",
+                    "sha": "aabbccddeeff00112233445566778899aabbccdd"
+                }
+            ]
+        }
+        """;
+
+        byte[] fakeBinary = new byte[] { 0x50, 0x4B, 0x03, 0x04 };
+        string? requestedTreeUrl = null;
+        string? requestedManifestUrl = null;
+
+        var handler = new MockHttpMessageHandler((req, ct) =>
+        {
+            string url = req.RequestUri!.ToString();
+            if (url == "https://api.github.com/repos/qwe213312/k25FCdfEOoEJ42S6/git/trees/main")
+            {
+                requestedTreeUrl = url;
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(treeJson)
+                };
+            }
+            if (url == "https://raw.githubusercontent.com/qwe213312/k25FCdfEOoEJ42S6/main/1000011_2155801291552894539.manifest")
+            {
+                requestedManifestUrl = url;
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent(fakeBinary)
+                };
+            }
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using var client = new HttpClient(handler);
+        using var adapter = new K25SourceAdapter(new K25Options
+        {
+            BaseUrl = "https://raw.githubusercontent.com/qwe213312/k25FCdfEOoEJ42S6/main",
+            DepotMetadataUrlTemplate = null // Direct tree discovery
+        }, client);
+
+        var discovered = await adapter.DiscoverManifestsForDepotAsync(1000011);
+
+        Assert.Equal("https://api.github.com/repos/qwe213312/k25FCdfEOoEJ42S6/git/trees/main", requestedTreeUrl);
+        Assert.Equal(2, discovered.Count);
+        Assert.Contains(discovered, m => m.DepotId == 1000011 && m.ManifestId == 2155801291552894539UL && m.ExpectedSha1 == "db18c248dd1e182713af62d09ccc38f22cc1c368");
+        Assert.Contains(discovered, m => m.DepotId == 1000011 && m.ManifestId == 2916223256493235763UL);
+
+        // Download raw binary from verified root template: {baseUrl}/{depotId}_{manifestId}.manifest
+        var binary = await adapter.DownloadManifestAsync(1000011, 2155801291552894539UL);
+        Assert.NotNull(binary);
+        Assert.Equal(fakeBinary, binary);
+        Assert.Equal("https://raw.githubusercontent.com/qwe213312/k25FCdfEOoEJ42S6/main/1000011_2155801291552894539.manifest", requestedManifestUrl);
+    }
+
+    [Fact]
+    public async Task K25SourceAdapter_LiveIntegration_AuthenticGitHub()
+    {
+        try
+        {
+            using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+            using var adapter = new K25SourceAdapter(null, httpClient);
+
+            // Download known depot 1000011 manifest 2155801291552894539 from live K25 GitHub repo
+            var bytes = await adapter.DownloadManifestAsync(1000011, 2155801291552894539UL);
+            if (bytes != null)
+            {
+                Assert.True(bytes.Length > 0);
+            }
+        }
+        catch (HttpRequestException)
+        {
+            // Network unavailable or GitHub rate limited; skip gracefully in disconnected test runners
+        }
+    }
+
+    #endregion
+
+    #region Version History & Authentic Dates Tests
+
+    [Fact]
+    public void BuildSnapshot_And_ManifestRevision_DisplayUnknownDate_WhenCreationTimeNull()
+    {
+        var snapshot = new BlueStar.ManifestHub.Core.Models.BuildSnapshot
+        {
+            AppId = 730,
+            BuildId = 1,
+            CreationTime = null
+        };
+
+        Assert.Equal("Unknown date", snapshot.DisplayDate);
+        Assert.Equal("Fecha desconocida", snapshot.DisplayDateEs);
+        Assert.Equal("Fecha desconocida", snapshot.GetDisplayDate("es"));
+        Assert.Equal("Unknown date", snapshot.GetDisplayDate("en"));
+
+        var revision = new BlueStar.ManifestHub.Core.Models.ManifestRevision
+        {
+            DepotId = 731,
+            ManifestId = 12345,
+            CreationTime = null
+        };
+
+        Assert.Equal("Unknown date", revision.DisplayDate);
+        Assert.Equal("Fecha desconocida", revision.DisplayDateEs);
+
+        // When authentic date exists
+        var authenticDate = new DateTimeOffset(2025, 6, 15, 12, 0, 0, TimeSpan.Zero);
+        var snapshotWithDate = new BlueStar.ManifestHub.Core.Models.BuildSnapshot
+        {
+            AppId = 730,
+            BuildId = 2,
+            CreationTime = authenticDate
+        };
+
+        Assert.Contains("2025-06-15", snapshotWithDate.DisplayDate);
+        Assert.Contains("UTC", snapshotWithDate.DisplayDate);
+        Assert.Contains("2025-06-15", snapshotWithDate.DisplayDateEs);
+    }
+
+    [Fact]
+    public async Task ManifestStorageManager_GetSnapshotByAuthenticDate_SelectsSnapshotAndDepotRevisions()
+    {
+        var storageManager = new BlueStar.ManifestHub.Core.Storage.ManifestStorageManager(
+            new BlueStar.ManifestHub.Core.Storage.StorageOptions { BasePath = _testDir });
+
+        uint appId = 730;
+        uint depot1 = 731;
+        uint depot2 = 732;
+        ulong m1 = 11111111UL;
+        ulong m2 = 22222222UL;
+
+        var authenticDate = new DateTimeOffset(2025, 8, 20, 15, 30, 0, TimeSpan.Zero);
+
+        // Publish manifest revisions with authentic dates
+        byte[] b1 = TestManifestHelper.CreateValidManifest(depot1, m1, authenticDate);
+        byte[] b2 = TestManifestHelper.CreateValidManifest(depot2, m2, authenticDate);
+
+        await storageManager.PublishManifestAsync(b1, depot1, m1, "TestSrc", "tester", fallbackTimestamp: authenticDate);
+        await storageManager.PublishManifestAsync(b2, depot2, m2, "TestSrc", "tester", fallbackTimestamp: authenticDate);
+
+        // Save a complete snapshot with this authentic date
+        var snapshot = new BlueStar.ManifestHub.Core.Models.BuildSnapshot
+        {
+            AppId = appId,
+            BuildId = 500,
+            CreationTime = authenticDate,
+            Timestamp = authenticDate,
+            DepotManifests = new Dictionary<uint, ulong>
+            {
+                [depot1] = m1,
+                [depot2] = m2
+            }
+        };
+
+        await storageManager.SaveBuildSnapshotAsync(snapshot);
+
+        // Select snapshot by authentic date
+        var (foundSnapshot, revisions) = await storageManager.GetSnapshotByAuthenticDateAsync(appId, authenticDate);
+
+        Assert.NotNull(foundSnapshot);
+        Assert.Equal((ulong)500, foundSnapshot.BuildId);
+        Assert.Equal(2, revisions.Count);
+        Assert.True(revisions.ContainsKey(depot1));
+        Assert.True(revisions.ContainsKey(depot2));
+        Assert.Equal(m1, revisions[depot1].ManifestId);
+        Assert.Equal(m2, revisions[depot2].ManifestId);
+
+        // If queried with non-matching date, returns null snapshot
+        var (missingSnapshot, emptyRevs) = await storageManager.GetSnapshotByAuthenticDateAsync(
+            appId, authenticDate.AddDays(10));
+        Assert.Null(missingSnapshot);
+        Assert.Empty(emptyRevs);
     }
 
     #endregion

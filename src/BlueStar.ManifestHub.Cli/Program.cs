@@ -149,6 +149,11 @@ public static class Program
         }
 
         Console.WriteLine($"Ingesting manifests for {appIdsToIngest.Count} applications...");
+        int totalDiscovered = 0;
+        int totalPublished = 0;
+        int totalAlreadyStored = 0;
+        int totalFailed = 0;
+
         foreach (uint appId in appIdsToIngest)
         {
             Console.WriteLine($"[INGEST] Processing AppId {appId}...");
@@ -161,9 +166,44 @@ public static class Program
                     Console.WriteLine($"  [WARN] {err}");
                 }
             }
+
+            totalDiscovered += result.TotalDiscovered;
+            totalPublished += result.SuccessfullyIngested;
+            totalAlreadyStored += result.AlreadyStored;
+            totalFailed += result.Failed;
         }
 
-        Console.WriteLine("Ingestion completed successfully.");
+        int totalRejected = totalAlreadyStored + totalFailed;
+
+        // Structured summary table
+        Console.WriteLine();
+        Console.WriteLine("+----------------------------------------------------------+");
+        Console.WriteLine("|                MANIFEST INGESTION SUMMARY                |");
+        Console.WriteLine("+-----------------------------------+----------------------+");
+        Console.WriteLine($"| Applications Processed            | {appIdsToIngest.Count,20} |");
+        Console.WriteLine($"| Total Discovered                  | {totalDiscovered,20} |");
+        Console.WriteLine($"| Total Published                   | {totalPublished,20} |");
+        Console.WriteLine($"| Total Rejected                    | {totalRejected,20} |");
+        Console.WriteLine($"|   - Already Stored                | {totalAlreadyStored,20} |");
+        Console.WriteLine($"|   - Failed / Invalid              | {totalFailed,20} |");
+        Console.WriteLine("+-----------------------------------+----------------------+");
+        Console.WriteLine();
+
+        // CRITICAL: Do NOT declare success (exit code 0) if all sources returned zero discovered manifests across all processed apps!
+        if (totalDiscovered == 0)
+        {
+            Console.Error.WriteLine("[ERROR] All ingestion sources returned zero discovered manifests across all processed applications.");
+            Console.Error.WriteLine("[ERROR] Ingestion failed. Exiting with exit code 1.");
+            return 1;
+        }
+
+        if (totalPublished == 0 && totalAlreadyStored == 0 && totalFailed > 0)
+        {
+            Console.Error.WriteLine("[ERROR] Ingestion failed: all discovered manifests failed validation or acquisition.");
+            return 1;
+        }
+
+        Console.WriteLine("[SUCCESS] Ingestion completed successfully.");
         return 0;
     }
 }

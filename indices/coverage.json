@@ -1,0 +1,111 @@
+{
+  "10:11": {
+    "schemaVersion": "v1",
+    "appId": 10,
+    "depotId": 11,
+    "totalRevisions": 2,
+    "availableRevisions": 2,
+    "missingRevisions": 0,
+    "coverageRatio": 1,
+    "latestAvailableManifestId": 3018093494972814332,
+    "lastChecked": "2026-10-15T23:50:47.8972969+00:00"
+  },
+  "10:95": {
+    "schemaVersion": "v1",
+    "appId": 10,
+    "depotId": 95,
+    "totalRevisions": 1,
+    "availableRevisions": 1,
+    "missingRevisions": 0,
+    "coverageRatio": 1,
+    "latestAvailableManifestId": 7685864384078520360,
+    "lastChecked": "2026-10-15T23:50:47.9101699+00:00"
+  },
+  "10:12": {
+    "schemaVersion": "v1",
+    "appId": 10,
+    "depotId": 12,
+    "totalRevisions": 2,
+    "availableRevisions": 2,
+    "missingRevisions": 0,
+    "coverageRatio": 1,
+    "latestAvailableManifestId": 7476629819067189879,
+    "lastChecked": "2026-10-15T23:50:47.9272078+00:00"
+  },
+  "10:13": {
+    "schemaVersion": "v1",
+    "appId": 10,
+    "depotId": 13,
+    "totalRevisions": 2,
+    "availableRevisions": 2,
+    "missingRevisions": 0,
+    "coverageRatio": 1,
+    "latestAvailableManifestId": 1596103708518313909,
+    "lastChecked": "2026-10-15T23:50:47.9383082+00:00"
+  },
+  "10:14": {
+    "schemaVersion": "v1",
+    "appId": 10,
+    "depotId": 14,
+    "totalRevisions": 2,
+    "availableRevisions": 2,
+    "missingRevisions": 0,
+    "coverageRatio": 1,
+    "latestAvailableManifestId": 4163740413628378088,
+    "lastChecked": "2026-10-15T23:50:47.9487046+00:00"
+  },
+  "10:15": {
+    "schemaVersion": "v1",
+    "appId": 10,
+    "depotId": 15,
+    "totalRevisions": 2,
+    "availableRevisions": 2,
+    "missingRevisions": 0,
+    "coverageRatio": 1,
+    "latestAvailableManifestId": 2951655054604220030,
+    "lastChecked": "2026-10-15T23:50:47.9606714+00:00"
+  },
+  "10:17": {
+    "schemaVersion": "v1",
+    "appId": 10,
+    "depotId": 17,
+    "totalRevisions": 2,
+    "availableRevisions": 2,
+    "missingRevisions": 0,
+    "coverageRatio": 1,
+    "latestAvailableManifestId": 8232848132911478974,
+    "lastChecked": "2026-10-15T23:50:47.9722799+00:00"
+  },
+  "10:18": {
+    "schemaVersion": "v1",
+    "appId": 10,
+    "depotId": 18,
+    "totalRevisions": 2,
+    "availableRevisions": 2,
+    "missingRevisions": 0,
+    "coverageRatio": 1,
+    "latestAvailableManifestId": 9210252686867714338,
+    "lastChecked": "2026-10-15T23:50:47.9846068+00:00"
+  },
+  "10:19": {
+    "schemaVersion": "v1",
+    "appId": 10,
+    "depotId": 19,
+    "totalRevisions": 2,
+    "availableRevisions": 2,
+    "missingRevisions": 0,
+    "coverageRatio": 1,
+    "latestAvailableManifestId": 5149037574830114753,
+    "lastChecked": "2026-10-15T23:50:47.9964005+00:00"
+  },
+  "10:142": {
+    "schemaVersion": "v1",
+    "appId": 10,
+    "depotId": 142,
+    "totalRevisions": 1,
+    "availableRevisions": 0,
+    "missingRevisions": 1,
+    "coverageRatio": 0,
+    "lastChecked": "2026-10-15T23:50:48.0089306+00:00"
+  }
+}

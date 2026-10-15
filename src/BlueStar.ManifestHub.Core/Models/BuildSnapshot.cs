@@ -37,4 +37,20 @@ public sealed class BuildSnapshot
     /// </summary>
     [JsonPropertyName("depotManifests")]
     public IReadOnlyDictionary<uint, ulong> DepotManifests { get; init; } = new Dictionary<uint, ulong>();
+
+    /// <summary>
+    /// Display date string for UI/CLI presentation. Displays "Fecha desconocida" / "Unknown date" when no authentic date exists.
+    /// </summary>
+    [JsonIgnore]
+    public string DisplayDate => CreationTime.HasValue
+        ? CreationTime.Value.ToString("yyyy-MM-dd HH:mm:ss 'UTC'")
+        : "Unknown date";
+
+    [JsonIgnore]
+    public string DisplayDateEs => CreationTime.HasValue
+        ? CreationTime.Value.ToString("yyyy-MM-dd HH:mm:ss 'UTC'")
+        : "Fecha desconocida";
+
+    public string GetDisplayDate(string lang = "en") =>
+        lang.StartsWith("es", StringComparison.OrdinalIgnoreCase) ? DisplayDateEs : DisplayDate;
 }

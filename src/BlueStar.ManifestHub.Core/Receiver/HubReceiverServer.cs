@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
@@ -31,6 +32,9 @@ public sealed class HubReceiverServer : IAsyncDisposable
     private readonly StardustLedgerManager _ledgerManager;
     private readonly WebhookProcessor _webhookProcessor;
     private readonly HubReceiverOptions _options;
+    private readonly SlidingWindowRateLimiter _ipRateLimiter;
+    private readonly SlidingWindowRateLimiter _contributorRateLimiter;
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _keyedLocks = new();
     private int _boundPort;
     private string _baseUrl = string.Empty;
 
@@ -44,6 +48,9 @@ public sealed class HubReceiverServer : IAsyncDisposable
         _ledgerManager = ledgerManager ?? throw new ArgumentNullException(nameof(ledgerManager));
         _webhookProcessor = webhookProcessor ?? throw new ArgumentNullException(nameof(webhookProcessor));
         _options = options ?? new HubReceiverOptions();
+
+        _ipRateLimiter = new SlidingWindowRateLimiter(TimeSpan.FromMinutes(1));
+        _contributorRateLimiter = new SlidingWindowRateLimiter(TimeSpan.FromMinutes(1));
 
         _boundPort = _options.Port;
         _baseUrl = $"http://{_options.Host}:{_boundPort}";
@@ -77,6 +84,9 @@ public sealed class HubReceiverServer : IAsyncDisposable
         _webhookProcessor = webhookProcessor;
         _options = receiverOptions ?? new HubReceiverOptions();
 
+        _ipRateLimiter = new SlidingWindowRateLimiter(TimeSpan.FromMinutes(1));
+        _contributorRateLimiter = new SlidingWindowRateLimiter(TimeSpan.FromMinutes(1));
+
         _boundPort = _options.Port;
         _baseUrl = $"http://{_options.Host}:{_boundPort}";
 
@@ -99,9 +109,64 @@ public sealed class HubReceiverServer : IAsyncDisposable
         builder.Logging.AddConsole();
         builder.Logging.SetMinimumLevel(LogLevel.Warning);
 
+        builder.WebHost.ConfigureKestrel(serverOptions =>
+        {
+            // Allow unlimited Kestrel-level request body so that our custom
+            // size-checking middleware and endpoints can cleanly return HTTP 413 Payload Too Large
+            serverOptions.Limits.MaxRequestBodySize = null;
+        });
+
         builder.WebHost.UseUrls($"http://{_options.Host}:{_options.Port}");
 
         var app = builder.Build();
+
+        // Security Middleware 1: IP-based sliding window rate limiting
+        app.Use(async (context, next) =>
+        {
+            // Health checks bypass rate limiting to prevent load balancers dropping healthy nodes
+            if (context.Request.Path == "/health" || context.Request.Path == "/api/v1/status")
+            {
+                await next();
+                return;
+            }
+
+            string clientIp = GetClientIp(context);
+            if (!_ipRateLimiter.TryAcquire(clientIp, _options.MaxRequestsPerMinutePerIp, out int retryAfterSeconds))
+            {
+                context.Response.Headers.Append("Retry-After", retryAfterSeconds.ToString());
+                context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(
+                    JsonSerializer.Serialize(new
+                    {
+                        error = $"Rate limit exceeded for IP '{clientIp}'. Maximum {_options.MaxRequestsPerMinutePerIp} requests per minute allowed.",
+                        isSuccess = false
+                    }));
+                return;
+            }
+
+            await next();
+        });
+
+        // Security Middleware 2: Content-Length payload size enforcement
+        app.Use(async (context, next) =>
+        {
+            if (context.Request.ContentLength.HasValue &&
+                context.Request.ContentLength.Value > _options.MaxPayloadSizeBytes)
+            {
+                context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(
+                    JsonSerializer.Serialize(new
+                    {
+                        error = $"Request payload exceeds maximum allowed size of {_options.MaxPayloadSizeBytes} bytes.",
+                        isSuccess = false
+                    }));
+                return;
+            }
+
+            await next();
+        });
 
         MapEndpoints(app);
 
@@ -117,11 +182,32 @@ public sealed class HubReceiverServer : IAsyncDisposable
         // 2. Contributions publication endpoint
         app.MapPost("/api/v1/contributions/publish", async (HttpContext context, CancellationToken cancellationToken) =>
         {
+            // Stream size validation
+            using var buffer = new MemoryStream();
+            byte[] chunk = new byte[65536];
+            int bytesRead;
+            long totalBytes = 0;
+
+            while ((bytesRead = await context.Request.Body.ReadAsync(chunk, 0, chunk.Length, cancellationToken)) > 0)
+            {
+                totalBytes += bytesRead;
+                if (totalBytes > _options.MaxPayloadSizeBytes)
+                {
+                    return Results.Json(new
+                    {
+                        error = $"Request payload exceeds maximum allowed size of {_options.MaxPayloadSizeBytes} bytes.",
+                        isSuccess = false
+                    }, statusCode: StatusCodes.Status413PayloadTooLarge);
+                }
+                buffer.Write(chunk, 0, bytesRead);
+            }
+
+            buffer.Position = 0;
             ContributionSubmission? submission;
             try
             {
                 submission = await JsonSerializer.DeserializeAsync<ContributionSubmission>(
-                    context.Request.Body,
+                    buffer,
                     new JsonSerializerOptions { PropertyNameCaseInsensitive = true },
                     cancellationToken);
             }
@@ -150,7 +236,18 @@ public sealed class HubReceiverServer : IAsyncDisposable
                 return Results.BadRequest(new { error = ex.Message, isSuccess = false });
             }
 
-            // 2. Validate IDs
+            // 2. Anti-spam / Rate limit per Contributor Pseudonym
+            if (!_contributorRateLimiter.TryAcquire(submission.AnonymousContributorId, _options.MaxContributionsPerMinutePerContributor, out int retryAfterContributor))
+            {
+                context.Response.Headers.Append("Retry-After", retryAfterContributor.ToString());
+                return Results.Json(new
+                {
+                    error = $"Rate limit exceeded for contributor '{submission.AnonymousContributorId}'. Maximum {_options.MaxContributionsPerMinutePerContributor} contributions per minute allowed.",
+                    isSuccess = false
+                }, statusCode: StatusCodes.Status429TooManyRequests);
+            }
+
+            // 3. Validate IDs
             if (submission.DepotId == 0)
             {
                 return Results.BadRequest(new { error = "DepotId must be greater than 0.", isSuccess = false });
@@ -161,7 +258,7 @@ public sealed class HubReceiverServer : IAsyncDisposable
                 return Results.BadRequest(new { error = "ManifestId must be greater than 0.", isSuccess = false });
             }
 
-            // 3. Validate Base64 payload
+            // 4. Validate Base64 payload
             if (string.IsNullOrWhiteSpace(submission.PayloadBase64))
             {
                 return Results.BadRequest(new { error = "PayloadBase64 is required.", isSuccess = false });
@@ -177,7 +274,16 @@ public sealed class HubReceiverServer : IAsyncDisposable
                 return Results.BadRequest(new { error = "Invalid Base64 payload data.", isSuccess = false });
             }
 
-            // 4. Validate Steam Protobuf magic header [0xD0, 0x17, 0xF6, 0x71]
+            if (payloadBytes.Length > _options.MaxPayloadSizeBytes)
+            {
+                return Results.Json(new
+                {
+                    error = $"Manifest binary payload exceeds maximum allowed size of {_options.MaxPayloadSizeBytes} bytes.",
+                    isSuccess = false
+                }, statusCode: StatusCodes.Status413PayloadTooLarge);
+            }
+
+            // 5. Validate Steam Protobuf magic header [0xD0, 0x17, 0xF6, 0x71]
             if (payloadBytes.Length < 4 ||
                 payloadBytes[0] != 0xD0 ||
                 payloadBytes[1] != 0x17 ||
@@ -191,7 +297,7 @@ public sealed class HubReceiverServer : IAsyncDisposable
                 });
             }
 
-            // 5. SHA-256 integrity check
+            // 6. SHA-256 integrity check
             byte[] computedHashBytes = SHA256.HashData(payloadBytes);
             string computedSha256 = Convert.ToHexString(computedHashBytes).ToLowerInvariant();
 
@@ -205,126 +311,154 @@ public sealed class HubReceiverServer : IAsyncDisposable
                 });
             }
 
-            // 6. Publish manifest via StorageManager
-            var publishResult = await _storageManager.PublishManifestAsync(
-                manifestBytes: payloadBytes,
-                depotId: submission.DepotId,
-                manifestId: submission.ManifestId,
-                source: "RemoteContribution",
-                contributorPseudonym: submission.AnonymousContributorId,
-                expectedSha256: computedSha256,
-                cancellationToken: cancellationToken);
-
-            if (!publishResult.IsSuccess)
+            // 7. Concurrency lock per depot/manifest
+            string artifactLockKey = $"manifest:{submission.DepotId}:{submission.ManifestId}";
+            using (await AcquireLockAsync(artifactLockKey, cancellationToken))
             {
-                return Results.BadRequest(new
-                {
-                    error = publishResult.Message ?? "Manifest publication failed.",
-                    isSuccess = false
-                });
-            }
-
-            // 7. Directly invoke StardustLedgerManager for confirmed publication with idempotency
-            int stardustCredited = 0;
-            bool isDuplicate = publishResult.IsDuplicate;
-
-            if (!isDuplicate)
-            {
+                // Replay check & publication via StorageManager
+                PublishResult publishResult;
                 try
                 {
-                    var ledgerEntry = await _ledgerManager.AwardPointsForManifestAsync(
-                        contributorPseudonym: submission.AnonymousContributorId,
+                    publishResult = await _storageManager.PublishManifestAsync(
+                        manifestBytes: payloadBytes,
                         depotId: submission.DepotId,
                         manifestId: submission.ManifestId,
-                        status: ManifestStatus.AvailableAndValidated,
-                        points: _options.StardustRewardPoints,
-                        reason: $"Contribution for depot {submission.DepotId} manifest {submission.ManifestId}",
+                        source: "RemoteContribution",
+                        contributorPseudonym: submission.AnonymousContributorId,
+                        expectedSha256: computedSha256,
                         cancellationToken: cancellationToken);
-
-                    stardustCredited = ledgerEntry.Points;
                 }
-                catch (DuplicateArtifactRewardException)
+                catch (Exception ex)
                 {
-                    isDuplicate = true;
-                    stardustCredited = 0;
-                }
-            }
-
-            // 8. Update builds/{AppId}.json and catalog indices
-            if (submission.AppId > 0)
-            {
-                // Update indices/apps.json
-                var existingApp = await _storageManager.GetAppRecordAsync(submission.AppId, cancellationToken);
-                var depotSet = new HashSet<uint>(existingApp?.DepotIds ?? Array.Empty<uint>()) { submission.DepotId };
-                var appRecord = new AppRecord
-                {
-                    AppId = submission.AppId,
-                    Name = existingApp?.Name ?? $"App {submission.AppId}",
-                    DepotIds = depotSet.OrderBy(x => x).ToList(),
-                    LastUpdated = DateTimeOffset.UtcNow,
-                    Metadata = existingApp?.Metadata ?? new Dictionary<string, string>()
-                };
-                await _storageManager.UpdateAppRecordAsync(appRecord, cancellationToken);
-
-                // Update builds/{AppId}.json
-                var existingSnapshots = await _storageManager.GetBuildSnapshotsAsync(submission.AppId, cancellationToken);
-                ulong buildId = existingSnapshots.Count > 0 ? existingSnapshots.Max(s => s.BuildId) + 1 : 1UL;
-                var depotManifests = new Dictionary<uint, ulong>();
-                if (existingSnapshots.Count > 0)
-                {
-                    foreach (var (k, v) in existingSnapshots[0].DepotManifests)
+                    return Results.Json(new
                     {
-                        depotManifests[k] = v;
+                        error = $"Manifest storage publication failed: {ex.Message}",
+                        isSuccess = false
+                    }, statusCode: StatusCodes.Status500InternalServerError);
+                }
+
+                if (!publishResult.IsSuccess)
+                {
+                    return Results.BadRequest(new
+                    {
+                        error = publishResult.Message ?? "Manifest publication failed.",
+                        isSuccess = false
+                    });
+                }
+
+                // 8. Directly invoke StardustLedgerManager for confirmed publication with idempotency & replay protection
+                int stardustCredited = 0;
+                bool isDuplicate = publishResult.IsDuplicate;
+
+                if (!isDuplicate)
+                {
+                    try
+                    {
+                        var ledgerEntry = await _ledgerManager.AwardPointsForManifestAsync(
+                            contributorPseudonym: submission.AnonymousContributorId,
+                            depotId: submission.DepotId,
+                            manifestId: submission.ManifestId,
+                            status: ManifestStatus.AvailableAndValidated,
+                            points: _options.StardustRewardPoints,
+                            reason: $"Contribution for depot {submission.DepotId} manifest {submission.ManifestId}",
+                            cancellationToken: cancellationToken);
+
+                        stardustCredited = ledgerEntry.Points;
+                    }
+                    catch (DuplicateArtifactRewardException)
+                    {
+                        isDuplicate = true;
+                        stardustCredited = 0;
+                    }
+                    catch (Exception ex)
+                    {
+                        return Results.Json(new
+                        {
+                            error = $"Ledger reward allocation failed: {ex.Message}",
+                            isSuccess = false
+                        }, statusCode: StatusCodes.Status500InternalServerError);
                     }
                 }
-                depotManifests[submission.DepotId] = submission.ManifestId;
 
-                // Authentic creation timestamp from manifest revision
-                DateTimeOffset? authenticTime = publishResult.Revision?.CreationTime;
-                if (!authenticTime.HasValue && existingSnapshots.Count > 0)
+                // 9. Update builds/{AppId}.json and catalog indices (protected by per-app lock)
+                if (submission.AppId > 0)
                 {
-                    authenticTime = existingSnapshots[0].Timestamp;
+                    using (await AcquireLockAsync($"app:{submission.AppId}", cancellationToken))
+                    {
+                        // Update indices/apps.json
+                        var existingApp = await _storageManager.GetAppRecordAsync(submission.AppId, cancellationToken);
+                        var depotSet = new HashSet<uint>(existingApp?.DepotIds ?? Array.Empty<uint>()) { submission.DepotId };
+                        var appRecord = new AppRecord
+                        {
+                            AppId = submission.AppId,
+                            Name = existingApp?.Name ?? $"App {submission.AppId}",
+                            DepotIds = depotSet.OrderBy(x => x).ToList(),
+                            LastUpdated = DateTimeOffset.UtcNow,
+                            Metadata = existingApp?.Metadata ?? new Dictionary<string, string>()
+                        };
+                        await _storageManager.UpdateAppRecordAsync(appRecord, cancellationToken);
+
+                        // Update builds/{AppId}.json
+                        var existingSnapshots = await _storageManager.GetBuildSnapshotsAsync(submission.AppId, cancellationToken);
+                        ulong buildId = existingSnapshots.Count > 0 ? existingSnapshots.Max(s => s.BuildId) + 1 : 1UL;
+                        
+                        // Authentic creation timestamp from manifest revision
+                        // Auditor Finding 4: Never fabricate dates from previous snapshots!
+                        DateTimeOffset? authenticTime = publishResult.Revision?.CreationTime;
+                        if (authenticTime == DateTimeOffset.MinValue)
+                        {
+                            authenticTime = null;
+                        }
+
+                        // Do NOT fabricate complete builds from individual contributions
+                        var depotManifests = new Dictionary<uint, ulong>
+                        {
+                            [submission.DepotId] = submission.ManifestId
+                        };
+
+                        var snapshot = new BuildSnapshot
+                        {
+                            AppId = submission.AppId,
+                            BuildId = buildId,
+                            Timestamp = authenticTime ?? DateTimeOffset.UnixEpoch,
+                            CreationTime = authenticTime,
+                            Branch = "public",
+                            Description = $"Build snapshot for App {submission.AppId}",
+                            DepotManifests = depotManifests
+                        };
+                        await _storageManager.SaveBuildSnapshotAsync(snapshot, cancellationToken);
+
+                        // Update indices/coverage.json
+                        var depotRecord = await _storageManager.GetDepotRecordAsync(submission.DepotId, cancellationToken);
+                        var manifestIds = depotRecord?.ManifestIds ?? new[] { submission.ManifestId };
+                        await _storageManager.ComputeAndSaveCoverageAsync(submission.AppId, submission.DepotId, manifestIds, cancellationToken);
+                    }
                 }
 
-                var snapshot = new BuildSnapshot
+                // 10. Generate receipt with cryptographic verification hash
+                string receiptId = Guid.NewGuid().ToString("N");
+                DateTimeOffset receiptTimestamp = DateTimeOffset.UtcNow;
+                string verificationHash = PublicationReceipt.ComputeVerificationHash(
+                    receiptId, submission.AppId, submission.DepotId, submission.ManifestId, receiptTimestamp, computedSha256);
+
+                string receiptStatus = isDuplicate ? "Duplicate" : "Published";
+
+                var receipt = new PublicationReceipt
                 {
+                    ReceiptId = receiptId,
+                    Status = receiptStatus,
+                    IsSuccess = true,
+                    StardustCredited = isDuplicate ? 0 : (stardustCredited > 0 ? stardustCredited : _options.StardustRewardPoints),
+                    Timestamp = receiptTimestamp,
                     AppId = submission.AppId,
-                    BuildId = buildId,
-                    Timestamp = authenticTime ?? DateTimeOffset.UnixEpoch,
-                    CreationTime = authenticTime,
-                    Branch = "public",
-                    Description = $"Build snapshot for App {submission.AppId}",
-                    DepotManifests = depotManifests
+                    DepotId = submission.DepotId,
+                    ManifestId = submission.ManifestId,
+                    VerificationHash = verificationHash,
+                    IsDuplicate = isDuplicate
                 };
-                await _storageManager.SaveBuildSnapshotAsync(snapshot, cancellationToken);
 
-                // Update indices/coverage.json
-                var depotRecord = await _storageManager.GetDepotRecordAsync(submission.DepotId, cancellationToken);
-                var manifestIds = depotRecord?.ManifestIds ?? new[] { submission.ManifestId };
-                await _storageManager.ComputeAndSaveCoverageAsync(submission.AppId, submission.DepotId, manifestIds, cancellationToken);
+                return Results.Ok(receipt);
             }
-
-            // 9. Generate receipt with cryptographic verification hash
-            string receiptId = Guid.NewGuid().ToString("N");
-            DateTimeOffset receiptTimestamp = DateTimeOffset.UtcNow;
-            string verificationHash = PublicationReceipt.ComputeVerificationHash(
-                receiptId, submission.AppId, submission.DepotId, submission.ManifestId, receiptTimestamp, computedSha256);
-
-            var receipt = new PublicationReceipt
-            {
-                ReceiptId = receiptId,
-                Status = "Published",
-                IsSuccess = true,
-                StardustCredited = isDuplicate ? 0 : (stardustCredited > 0 ? stardustCredited : _options.StardustRewardPoints),
-                Timestamp = receiptTimestamp,
-                AppId = submission.AppId,
-                DepotId = submission.DepotId,
-                ManifestId = submission.ManifestId,
-                VerificationHash = verificationHash,
-                IsDuplicate = isDuplicate
-            };
-
-            return Results.Ok(receipt);
         });
 
         // 3. Stardust contributor balance query endpoint
@@ -464,5 +598,89 @@ public sealed class HubReceiverServer : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await _app.DisposeAsync();
+        foreach (var sem in _keyedLocks.Values)
+        {
+            sem.Dispose();
+        }
+        _keyedLocks.Clear();
+    }
+
+    private async Task<IDisposable> AcquireLockAsync(string key, CancellationToken cancellationToken)
+    {
+        var sem = _keyedLocks.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
+        await sem.WaitAsync(cancellationToken);
+        return new LockReleaser(sem);
+    }
+
+    private sealed class LockReleaser : IDisposable
+    {
+        private readonly SemaphoreSlim _sem;
+        public LockReleaser(SemaphoreSlim sem) => _sem = sem;
+        public void Dispose() => _sem.Release();
+    }
+
+    private static string GetClientIp(HttpContext context)
+    {
+        var forwardedFor = context.Request.Headers["X-Forwarded-For"].FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(forwardedFor))
+        {
+            var firstIp = forwardedFor.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(firstIp))
+            {
+                return firstIp;
+            }
+        }
+
+        var realIp = context.Request.Headers["X-Real-IP"].FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(realIp))
+        {
+            return realIp.Trim();
+        }
+
+        return context.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
+    }
+}
+
+/// <summary>
+/// Thread-safe in-memory sliding window rate limiter.
+/// </summary>
+internal sealed class SlidingWindowRateLimiter
+{
+    private readonly ConcurrentDictionary<string, List<long>> _tracker = new();
+    private readonly TimeSpan _window;
+
+    public SlidingWindowRateLimiter(TimeSpan window)
+    {
+        _window = window;
+    }
+
+    public bool TryAcquire(string key, int limit, out int retryAfterSeconds)
+    {
+        retryAfterSeconds = 0;
+        if (limit <= 0)
+        {
+            return true; // Unlimited / disabled
+        }
+
+        long nowTicks = Environment.TickCount64;
+        long windowMs = (long)_window.TotalMilliseconds;
+        long cutoff = nowTicks - windowMs;
+
+        var timestamps = _tracker.GetOrAdd(key, _ => new List<long>());
+        lock (timestamps)
+        {
+            timestamps.RemoveAll(t => t < cutoff);
+
+            if (timestamps.Count >= limit)
+            {
+                long oldest = timestamps[0];
+                long remainingMs = (oldest + windowMs) - nowTicks;
+                retryAfterSeconds = Math.Max(1, (int)Math.Ceiling(remainingMs / 1000.0));
+                return false;
+            }
+
+            timestamps.Add(nowTicks);
+            return true;
+        }
     }
 }

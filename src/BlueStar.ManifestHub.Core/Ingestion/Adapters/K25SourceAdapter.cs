@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Text.Json;
 
@@ -12,14 +13,15 @@ public sealed class K25Options
     public string BaseUrl { get; set; } = DefaultBaseUrl;
     public int Priority { get; set; } = 30;
     public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(30);
-    public string ManifestUrlTemplate { get; set; } = "{baseUrl}/manifests/{depotId}/{manifestId}.manifest";
-    public string AppMetadataUrlTemplate { get; set; } = "{baseUrl}/apps/{appId}.json";
-    public string DepotMetadataUrlTemplate { get; set; } = "{baseUrl}/depots/{depotId}.json";
+    public string ManifestUrlTemplate { get; set; } = "{baseUrl}/{depotId}_{manifestId}.manifest";
+    public string? AppMetadataUrlTemplate { get; set; } = "{baseUrl}/apps/{appId}.json";
+    public string? DepotMetadataUrlTemplate { get; set; } = "{baseUrl}/depots/{depotId}.json";
+    public string? TreeApiUrlTemplate { get; set; } = "https://api.github.com/repos/qwe213312/k25FCdfEOoEJ42S6/git/trees/main";
 }
 
 /// <summary>
 /// Adapter for qwe213312/k25FCdfEOoEJ42S6 manifest archive mirror.
-/// Discovers and downloads manifests hosted on the K25 mirror repository.
+/// Discovers and downloads manifests stored at repository root: {depotId}_{manifestId}.manifest.
 /// </summary>
 public sealed class K25SourceAdapter : IManifestSourceAdapter, IDisposable
 {
@@ -29,6 +31,8 @@ public sealed class K25SourceAdapter : IManifestSourceAdapter, IDisposable
     private int _consecutiveFailures;
     private DateTimeOffset _cooldownUntil = DateTimeOffset.MinValue;
     private readonly object _stateLock = new();
+    private readonly ConcurrentDictionary<uint, List<DiscoveredManifest>> _knownDepotManifests = new();
+    private readonly ConcurrentDictionary<(uint DepotId, ulong ManifestId), DiscoveredManifest> _allKnownManifests = new();
     private bool _disposed;
 
     public K25SourceAdapter(K25Options? options = null, HttpClient? httpClient = null)
@@ -57,6 +61,31 @@ public sealed class K25SourceAdapter : IManifestSourceAdapter, IDisposable
             lock (_stateLock)
             {
                 return DateTimeOffset.UtcNow >= _cooldownUntil;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Registers a known depot manifest for targeted query matching.
+    /// </summary>
+    public void RegisterManifest(uint depotId, ulong manifestId, string? sha256 = null, uint appId = 0, DateTimeOffset? creationTime = null)
+    {
+        var discovered = new DiscoveredManifest
+        {
+            AppId = appId,
+            DepotId = depotId,
+            ManifestId = manifestId,
+            ExpectedSha256 = sha256,
+            CreationTime = creationTime,
+            SourceId = SourceId
+        };
+        _allKnownManifests[(depotId, manifestId)] = discovered;
+        var list = _knownDepotManifests.GetOrAdd(depotId, _ => new List<DiscoveredManifest>());
+        lock (list)
+        {
+            if (!list.Any(x => x.ManifestId == manifestId))
+            {
+                list.Add(discovered);
             }
         }
     }
@@ -93,6 +122,11 @@ public sealed class K25SourceAdapter : IManifestSourceAdapter, IDisposable
         if (!IsAvailable)
             return Array.Empty<DiscoveredManifest>();
 
+        if (string.IsNullOrWhiteSpace(_options.AppMetadataUrlTemplate))
+        {
+            return _allKnownManifests.Values.Where(m => m.AppId == appId).ToList();
+        }
+
         string url = _options.AppMetadataUrlTemplate
             .Replace("{baseUrl}", _options.BaseUrl.TrimEnd('/'))
             .Replace("{appId}", appId.ToString());
@@ -103,7 +137,8 @@ public sealed class K25SourceAdapter : IManifestSourceAdapter, IDisposable
             if (response.StatusCode == HttpStatusCode.NotFound)
             {
                 RecordSuccess();
-                return Array.Empty<DiscoveredManifest>();
+                var matching = _allKnownManifests.Values.Where(m => m.AppId == appId).ToList();
+                return matching;
             }
 
             response.EnsureSuccessStatusCode();
@@ -115,7 +150,8 @@ public sealed class K25SourceAdapter : IManifestSourceAdapter, IDisposable
         catch (HttpRequestException)
         {
             RecordFailure();
-            return Array.Empty<DiscoveredManifest>();
+            var matching = _allKnownManifests.Values.Where(m => m.AppId == appId).ToList();
+            return matching;
         }
     }
 
@@ -130,30 +166,94 @@ public sealed class K25SourceAdapter : IManifestSourceAdapter, IDisposable
         if (!IsAvailable)
             return Array.Empty<DiscoveredManifest>();
 
-        string url = _options.DepotMetadataUrlTemplate
-            .Replace("{baseUrl}", _options.BaseUrl.TrimEnd('/'))
-            .Replace("{depotId}", depotId.ToString());
-
-        try
+        // 1. Check known / registered
+        if (_knownDepotManifests.TryGetValue(depotId, out var cached) && cached.Count > 0)
         {
-            using var response = await _httpClient.GetAsync(url, cancellationToken);
-            if (response.StatusCode == HttpStatusCode.NotFound)
+            lock (cached)
             {
-                RecordSuccess();
-                return Array.Empty<DiscoveredManifest>();
+                return cached.ToList();
             }
-
-            response.EnsureSuccessStatusCode();
-            RecordSuccess();
-
-            string json = await response.Content.ReadAsStringAsync(cancellationToken);
-            return ParseK25Json(0, depotId, json);
         }
-        catch (HttpRequestException)
+
+        // 2. Query Depot metadata url if configured
+        if (!string.IsNullOrWhiteSpace(_options.DepotMetadataUrlTemplate))
         {
-            RecordFailure();
-            return Array.Empty<DiscoveredManifest>();
+            string url = _options.DepotMetadataUrlTemplate
+                .Replace("{baseUrl}", _options.BaseUrl.TrimEnd('/'))
+                .Replace("{depotId}", depotId.ToString());
+
+            try
+            {
+                using var response = await _httpClient.GetAsync(url, cancellationToken);
+                if (response.IsSuccessStatusCode)
+                {
+                    RecordSuccess();
+                    string json = await response.Content.ReadAsStringAsync(cancellationToken);
+                    var parsed = ParseK25Json(0, depotId, json);
+                    if (parsed.Count > 0)
+                    {
+                        foreach (var m in parsed)
+                        {
+                            _allKnownManifests[(m.DepotId, m.ManifestId)] = m;
+                            var list = _knownDepotManifests.GetOrAdd(m.DepotId, _ => new List<DiscoveredManifest>());
+                            lock (list)
+                            {
+                                if (!list.Any(x => x.ManifestId == m.ManifestId))
+                                {
+                                    list.Add(m);
+                                }
+                            }
+                        }
+                        return parsed;
+                    }
+                }
+                else if (response.StatusCode == HttpStatusCode.NotFound)
+                {
+                    RecordSuccess();
+                }
+            }
+            catch (HttpRequestException)
+            {
+                RecordFailure();
+            }
         }
+
+        // 3. Query Tree API / index if configured
+        if (!string.IsNullOrWhiteSpace(_options.TreeApiUrlTemplate))
+        {
+            try
+            {
+                using var response = await _httpClient.GetAsync(_options.TreeApiUrlTemplate, cancellationToken);
+                if (response.IsSuccessStatusCode)
+                {
+                    RecordSuccess();
+                    string json = await response.Content.ReadAsStringAsync(cancellationToken);
+                    var parsed = ParseTreeJson(json, depotId);
+                    if (parsed.Count > 0)
+                    {
+                        return parsed;
+                    }
+                }
+                else if (response.StatusCode == HttpStatusCode.NotFound)
+                {
+                    RecordSuccess();
+                }
+            }
+            catch (HttpRequestException)
+            {
+                RecordFailure();
+            }
+        }
+
+        if (_knownDepotManifests.TryGetValue(depotId, out var fallback))
+        {
+            lock (fallback)
+            {
+                return fallback.ToList();
+            }
+        }
+
+        return Array.Empty<DiscoveredManifest>();
     }
 
     /// <inheritdoc />
@@ -193,6 +293,106 @@ public sealed class K25SourceAdapter : IManifestSourceAdapter, IDisposable
         }
     }
 
+    /// <summary>
+    /// Parses a git tree or directory index JSON containing {depotId}_{manifestId}.manifest entries.
+    /// </summary>
+    public IReadOnlyList<DiscoveredManifest> ParseTreeJson(string json, uint targetDepotId = 0)
+    {
+        var list = new List<DiscoveredManifest>();
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            JsonElement arrayElem = root;
+            if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("tree", out var treeProp))
+            {
+                arrayElem = treeProp;
+            }
+
+            if (arrayElem.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in arrayElem.EnumerateArray())
+                {
+                    string? path = null;
+                    string? sha = null;
+
+                    if (item.ValueKind == JsonValueKind.String)
+                    {
+                        path = item.GetString();
+                    }
+                    else if (item.ValueKind == JsonValueKind.Object)
+                    {
+                        if (item.TryGetProperty("path", out var pProp) || item.TryGetProperty("name", out pProp))
+                        {
+                            path = pProp.GetString();
+                        }
+                        if (item.TryGetProperty("sha", out var sProp))
+                        {
+                            sha = sProp.GetString();
+                        }
+                    }
+
+                    if (!string.IsNullOrEmpty(path) && TryParseManifestFileName(path, out uint depotId, out ulong manifestId))
+                    {
+                        if (targetDepotId == 0 || depotId == targetDepotId)
+                        {
+                            var discovered = new DiscoveredManifest
+                            {
+                                DepotId = depotId,
+                                ManifestId = manifestId,
+                                ExpectedSha1 = sha?.Length == 40 ? sha : null,
+                                ExpectedSha256 = sha?.Length == 64 ? sha : null,
+                                SourceId = SourceId
+                            };
+                            list.Add(discovered);
+                            _allKnownManifests[(depotId, manifestId)] = discovered;
+                            var depotList = _knownDepotManifests.GetOrAdd(depotId, _ => new List<DiscoveredManifest>());
+                            lock (depotList)
+                            {
+                                if (!depotList.Any(x => x.ManifestId == manifestId))
+                                {
+                                    depotList.Add(discovered);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // fallback
+        }
+
+        return list;
+    }
+
+    private static bool TryParseManifestFileName(string fileName, out uint depotId, out ulong manifestId)
+    {
+        depotId = 0;
+        manifestId = 0;
+
+        string name = Path.GetFileName(fileName);
+        if (name.EndsWith(".manifest", StringComparison.OrdinalIgnoreCase))
+        {
+            name = name[..^9];
+        }
+
+        int underscoreIdx = name.IndexOf('_');
+        if (underscoreIdx > 0 && underscoreIdx < name.Length - 1)
+        {
+            string depotStr = name[..underscoreIdx];
+            string manifestStr = name[(underscoreIdx + 1)..];
+            if (uint.TryParse(depotStr, out depotId) && ulong.TryParse(manifestStr, out manifestId))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private List<DiscoveredManifest> ParseK25Json(uint defaultAppId, uint defaultDepotId, string json)
     {
         var list = new List<DiscoveredManifest>();
@@ -201,8 +401,20 @@ public sealed class K25SourceAdapter : IManifestSourceAdapter, IDisposable
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
+            if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("tree", out _))
+            {
+                return ParseTreeJson(json, defaultDepotId).ToList();
+            }
+
             if (root.ValueKind == JsonValueKind.Array)
             {
+                // Check if array of filename strings
+                var first = root.EnumerateArray().FirstOrDefault();
+                if (first.ValueKind == JsonValueKind.String && first.GetString()?.EndsWith(".manifest", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    return ParseTreeJson(json, defaultDepotId).ToList();
+                }
+
                 foreach (var item in root.EnumerateArray())
                 {
                     if (TryParseManifestEntry(item, out ulong mId, out uint? itemDepotId, out string? sha256, out DateTimeOffset? timestamp))

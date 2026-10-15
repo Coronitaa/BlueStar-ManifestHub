@@ -1,0 +1,109 @@
+{
+  "11": {
+    "schemaVersion": "v1",
+    "depotId": 11,
+    "appId": 0,
+    "name": "Depot 11",
+    "latestManifestId": 4720911300072406946,
+    "manifestIds": [
+      3018093494972814332,
+      4720911300072406946
+    ],
+    "lastUpdated": "2026-10-15T23:50:22.0234129+00:00"
+  },
+  "95": {
+    "schemaVersion": "v1",
+    "depotId": 95,
+    "appId": 0,
+    "name": "Depot 95",
+    "latestManifestId": 7685864384078520360,
+    "manifestIds": [
+      7685864384078520360
+    ],
+    "lastUpdated": "2026-10-15T23:50:22.373631+00:00"
+  },
+  "12": {
+    "schemaVersion": "v1",
+    "depotId": 12,
+    "appId": 0,
+    "name": "Depot 12",
+    "latestManifestId": 4249506477070150661,
+    "manifestIds": [
+      7476629819067189879,
+      4249506477070150661
+    ],
+    "lastUpdated": "2026-10-15T23:50:23.5153667+00:00"
+  },
+  "13": {
+    "schemaVersion": "v1",
+    "depotId": 13,
+    "appId": 0,
+    "name": "Depot 13",
+    "latestManifestId": 8121279989947809180,
+    "manifestIds": [
+      1596103708518313909,
+      8121279989947809180
+    ],
+    "lastUpdated": "2026-10-15T23:50:24.7097981+00:00"
+  },
+  "14": {
+    "schemaVersion": "v1",
+    "depotId": 14,
+    "appId": 0,
+    "name": "Depot 14",
+    "latestManifestId": 797471157445930276,
+    "manifestIds": [
+      4163740413628378088,
+      797471157445930276
+    ],
+    "lastUpdated": "2026-10-15T23:50:25.8326292+00:00"
+  },
+  "15": {
+    "schemaVersion": "v1",
+    "depotId": 15,
+    "appId": 0,
+    "name": "Depot 15",
+    "latestManifestId": 347793025475409008,
+    "manifestIds": [
+      2951655054604220030,
+      347793025475409008
+    ],
+    "lastUpdated": "2026-10-15T23:50:27.0990839+00:00"
+  },
+  "17": {
+    "schemaVersion": "v1",
+    "depotId": 17,
+    "appId": 0,
+    "name": "Depot 17",
+    "latestManifestId": 3300893578491173381,
+    "manifestIds": [
+      8232848132911478974,
+      3300893578491173381
+    ],
+    "lastUpdated": "2026-10-15T23:50:28.2444673+00:00"
+  },
+  "18": {
+    "schemaVersion": "v1",
+    "depotId": 18,
+    "appId": 0,
+    "name": "Depot 18",
+    "latestManifestId": 2731601746579743404,
+    "manifestIds": [
+      9210252686867714338,
+      2731601746579743404
+    ],
+    "lastUpdated": "2026-10-15T23:50:29.3819168+00:00"
+  },
+  "19": {
+    "schemaVersion": "v1",
+    "depotId": 19,
+    "appId": 0,
+    "name": "Depot 19",
+    "latestManifestId": 4715338954315985237,
+    "manifestIds": [
+      5149037574830114753,
+      4715338954315985237
+    ],
+    "lastUpdated": "2026-10-15T23:50:30.3852816+00:00"
+  }
+}

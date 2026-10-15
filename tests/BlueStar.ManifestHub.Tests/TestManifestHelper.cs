@@ -10,7 +10,8 @@ public static class TestManifestHelper
         ulong manifestId = 1234567890123456789UL,
         DateTimeOffset? timestamp = null,
         string payload = "Hello BlueStar Depot Chunks",
-        bool compress = true)
+        bool compress = true,
+        bool includeMetadata = true)
     {
         return ManifestValidator.CreateSyntheticManifest(
             depotId,
@@ -18,7 +19,7 @@ public static class TestManifestHelper
             timestamp ?? DateTimeOffset.UtcNow,
             Encoding.UTF8.GetBytes(payload),
             compressPayload: compress,
-            includeMetadata: true);
+            includeMetadata: includeMetadata);
     }
 
     public static string CreateTestDirectory(string prefix = "hub_test_")

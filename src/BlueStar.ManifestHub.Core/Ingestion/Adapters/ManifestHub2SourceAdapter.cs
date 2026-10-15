@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Text.Json;
 
@@ -8,17 +9,18 @@ namespace BlueStar.ManifestHub.Core.Ingestion.Adapters;
 /// </summary>
 public sealed class ManifestHub2Options
 {
-    public const string DefaultBaseUrl = "https://raw.githubusercontent.com/SSMGAlt/ManifestHub2/main";
+    public const string DefaultBaseUrl = "https://raw.githubusercontent.com/SSMGAlt/ManifestHub2";
     public string BaseUrl { get; set; } = DefaultBaseUrl;
     public int Priority { get; set; } = 20;
     public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(30);
-    public string ManifestUrlTemplate { get; set; } = "{baseUrl}/manifests/{depotId}/{manifestId}.manifest";
-    public string AppMetadataUrlTemplate { get; set; } = "{baseUrl}/{appId}.json";
+    public string ManifestUrlTemplate { get; set; } = "{baseUrl}/{appId}/{depotId}_{manifestId}.manifest";
+    public string AppMetadataUrlTemplate { get; set; } = "{baseUrl}/{appId}/{appId}.json";
 }
 
 /// <summary>
 /// Adapter for SSMGAlt/ManifestHub2 manifest source.
-/// Discovers manifests from {appId}.json files and retrieves manifest binaries.
+/// Discovers manifests from branch-per-AppId repository structure ({appId}/{appId}.json)
+/// and retrieves manifest binaries ({appId}/{depotId}_{manifestId}.manifest).
 /// </summary>
 public sealed class ManifestHub2SourceAdapter : IManifestSourceAdapter, IDisposable
 {
@@ -28,6 +30,9 @@ public sealed class ManifestHub2SourceAdapter : IManifestSourceAdapter, IDisposa
     private int _consecutiveFailures;
     private DateTimeOffset _cooldownUntil = DateTimeOffset.MinValue;
     private readonly object _stateLock = new();
+    private readonly ConcurrentDictionary<(uint DepotId, ulong ManifestId), uint> _manifestToAppMap = new();
+    private readonly ConcurrentDictionary<uint, uint> _depotToAppMap = new();
+    private readonly ConcurrentDictionary<uint, List<DiscoveredManifest>> _discoveredByDepot = new();
     private bool _disposed;
 
     public ManifestHub2SourceAdapter(ManifestHub2Options? options = null, HttpClient? httpClient = null)
@@ -58,6 +63,27 @@ public sealed class ManifestHub2SourceAdapter : IManifestSourceAdapter, IDisposa
                 return DateTimeOffset.UtcNow >= _cooldownUntil;
             }
         }
+    }
+
+    /// <summary>
+    /// Explicitly registers a depot-to-appId mapping for URL routing.
+    /// </summary>
+    public void RegisterAppDepotMapping(uint appId, uint depotId)
+    {
+        if (appId > 0 && depotId > 0)
+        {
+            _depotToAppMap[depotId] = appId;
+        }
+    }
+
+    private static string CleanBaseUrl(string baseUrl)
+    {
+        string cleaned = baseUrl.TrimEnd('/');
+        if (cleaned.EndsWith("/main", StringComparison.OrdinalIgnoreCase))
+        {
+            cleaned = cleaned[..^5];
+        }
+        return cleaned;
     }
 
     private void RecordSuccess()
@@ -92,8 +118,9 @@ public sealed class ManifestHub2SourceAdapter : IManifestSourceAdapter, IDisposa
         if (!IsAvailable)
             return Array.Empty<DiscoveredManifest>();
 
+        string baseUrl = CleanBaseUrl(_options.BaseUrl);
         string url = _options.AppMetadataUrlTemplate
-            .Replace("{baseUrl}", _options.BaseUrl.TrimEnd('/'))
+            .Replace("{baseUrl}", baseUrl)
             .Replace("{appId}", appId.ToString());
 
         try
@@ -109,7 +136,23 @@ public sealed class ManifestHub2SourceAdapter : IManifestSourceAdapter, IDisposa
             RecordSuccess();
 
             string json = await response.Content.ReadAsStringAsync(cancellationToken);
-            return ParseAppManifests(appId, json);
+            var manifests = ParseAppManifests(appId, json);
+
+            foreach (var m in manifests)
+            {
+                _manifestToAppMap[(m.DepotId, m.ManifestId)] = appId;
+                _depotToAppMap[m.DepotId] = appId;
+                var list = _discoveredByDepot.GetOrAdd(m.DepotId, _ => new List<DiscoveredManifest>());
+                lock (list)
+                {
+                    if (!list.Any(x => x.ManifestId == m.ManifestId))
+                    {
+                        list.Add(m);
+                    }
+                }
+            }
+
+            return manifests;
         }
         catch (HttpRequestException)
         {
@@ -119,14 +162,60 @@ public sealed class ManifestHub2SourceAdapter : IManifestSourceAdapter, IDisposa
     }
 
     /// <inheritdoc />
-    public Task<IReadOnlyList<DiscoveredManifest>> DiscoverManifestsForDepotAsync(uint depotId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<DiscoveredManifest>> DiscoverManifestsForDepotAsync(uint depotId, CancellationToken cancellationToken = default)
     {
-        // ManifestHub2 structures catalog by appId.json; depot-only discovery returns empty list
-        return Task.FromResult<IReadOnlyList<DiscoveredManifest>>(Array.Empty<DiscoveredManifest>());
+        ThrowIfDisposed();
+
+        if (depotId == 0)
+            return Array.Empty<DiscoveredManifest>();
+
+        if (!IsAvailable)
+            return Array.Empty<DiscoveredManifest>();
+
+        if (_discoveredByDepot.TryGetValue(depotId, out var cached) && cached.Count > 0)
+        {
+            lock (cached)
+            {
+                return cached.ToList();
+            }
+        }
+
+        if (_depotToAppMap.TryGetValue(depotId, out uint mappedAppId) && mappedAppId > 0)
+        {
+            var manifests = await DiscoverManifestsAsync(mappedAppId, cancellationToken);
+            return manifests.Where(m => m.DepotId == depotId).ToList();
+        }
+
+        // Common Steam convention: base depot ID often equals app ID
+        var direct = await DiscoverManifestsAsync(depotId, cancellationToken);
+        var matching = direct.Where(m => m.DepotId == depotId).ToList();
+        return matching.Count > 0 ? matching : direct;
     }
 
     /// <inheritdoc />
-    public async Task<byte[]?> DownloadManifestAsync(uint depotId, ulong manifestId, CancellationToken cancellationToken = default)
+    public Task<byte[]?> DownloadManifestAsync(uint depotId, ulong manifestId, CancellationToken cancellationToken = default)
+    {
+        uint appId = 0;
+        if (_manifestToAppMap.TryGetValue((depotId, manifestId), out uint mAppId) && mAppId > 0)
+        {
+            appId = mAppId;
+        }
+        else if (_depotToAppMap.TryGetValue(depotId, out uint dAppId) && dAppId > 0)
+        {
+            appId = dAppId;
+        }
+        else
+        {
+            appId = depotId;
+        }
+
+        return DownloadManifestAsync(appId, depotId, manifestId, cancellationToken);
+    }
+
+    /// <summary>
+    /// Downloads manifest binary using explicit branch routing for {appId}.
+    /// </summary>
+    public async Task<byte[]?> DownloadManifestAsync(uint appId, uint depotId, ulong manifestId, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
 
@@ -136,8 +225,11 @@ public sealed class ManifestHub2SourceAdapter : IManifestSourceAdapter, IDisposa
         if (!IsAvailable)
             return null;
 
+        uint effectiveAppId = appId > 0 ? appId : depotId;
+        string baseUrl = CleanBaseUrl(_options.BaseUrl);
         string url = _options.ManifestUrlTemplate
-            .Replace("{baseUrl}", _options.BaseUrl.TrimEnd('/'))
+            .Replace("{baseUrl}", baseUrl)
+            .Replace("{appId}", effectiveAppId.ToString())
             .Replace("{depotId}", depotId.ToString())
             .Replace("{manifestId}", manifestId.ToString());
 
@@ -170,7 +262,8 @@ public sealed class ManifestHub2SourceAdapter : IManifestSourceAdapter, IDisposa
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
-            if (root.TryGetProperty("depots", out var depotsElement))
+            if (root.TryGetProperty("depot", out var depotsElement) ||
+                root.TryGetProperty("depots", out depotsElement))
             {
                 if (depotsElement.ValueKind == JsonValueKind.Object)
                 {
@@ -233,31 +326,47 @@ public sealed class ManifestHub2SourceAdapter : IManifestSourceAdapter, IDisposa
                 {
                     if (TryParseManifestId(item, out ulong mId))
                     {
-                        list.Add(new DiscoveredManifest
-                        {
-                            AppId = appId,
-                            DepotId = depotId,
-                            ManifestId = mId,
-                            SourceId = SourceId
-                        });
+                        AddManifest(list, appId, depotId, mId, null);
                     }
                 }
                 break;
 
             case JsonValueKind.Object:
-                if (element.TryGetProperty("manifests", out var manifestsProp) && manifestsProp.ValueKind == JsonValueKind.Array)
+                if (element.TryGetProperty("manifests", out var manifestsProp))
                 {
-                    foreach (var item in manifestsProp.EnumerateArray())
+                    if (manifestsProp.ValueKind == JsonValueKind.Object)
                     {
-                        if (TryParseManifestId(item, out ulong mId))
+                        // Authentic GitHub format: "manifests": { "public": { "gid": "5289214263727115270", "size": "7" }, ... }
+                        foreach (var branchProp in manifestsProp.EnumerateObject())
                         {
-                            list.Add(new DiscoveredManifest
+                            string branch = branchProp.Name;
+                            var val = branchProp.Value;
+
+                            if (val.ValueKind == JsonValueKind.Object)
                             {
-                                AppId = appId,
-                                DepotId = depotId,
-                                ManifestId = mId,
-                                SourceId = SourceId
-                            });
+                                if (val.TryGetProperty("gid", out var gidElem) && TryParseManifestId(gidElem, out ulong gid))
+                                {
+                                    AddManifest(list, appId, depotId, gid, branch);
+                                }
+                                else if (val.TryGetProperty("manifestId", out var mElem) && TryParseManifestId(mElem, out ulong mId))
+                                {
+                                    AddManifest(list, appId, depotId, mId, branch);
+                                }
+                            }
+                            else if (TryParseManifestId(val, out ulong singleId))
+                            {
+                                AddManifest(list, appId, depotId, singleId, branch);
+                            }
+                        }
+                    }
+                    else if (manifestsProp.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in manifestsProp.EnumerateArray())
+                        {
+                            if (TryParseManifestId(item, out ulong mId))
+                            {
+                                AddManifest(list, appId, depotId, mId, null);
+                            }
                         }
                     }
                 }
@@ -268,33 +377,34 @@ public sealed class ManifestHub2SourceAdapter : IManifestSourceAdapter, IDisposa
                 {
                     if (TryParseManifestId(latestProp, out ulong mId))
                     {
-                        if (!list.Any(x => x.DepotId == depotId && x.ManifestId == mId))
-                        {
-                            list.Add(new DiscoveredManifest
-                            {
-                                AppId = appId,
-                                DepotId = depotId,
-                                ManifestId = mId,
-                                SourceId = SourceId
-                            });
-                        }
+                        AddManifest(list, appId, depotId, mId, null);
                     }
                 }
                 break;
 
             case JsonValueKind.String:
             case JsonValueKind.Number:
-                if (TryParseManifestId(element, out ulong singleId))
+                if (TryParseManifestId(element, out ulong directId))
                 {
-                    list.Add(new DiscoveredManifest
-                    {
-                        AppId = appId,
-                        DepotId = depotId,
-                        ManifestId = singleId,
-                        SourceId = SourceId
-                    });
+                    AddManifest(list, appId, depotId, directId, null);
                 }
                 break;
+        }
+    }
+
+    private void AddManifest(List<DiscoveredManifest> list, uint appId, uint depotId, ulong manifestId, string? branch)
+    {
+        if (manifestId == 0) return;
+        if (!list.Any(x => x.DepotId == depotId && x.ManifestId == manifestId))
+        {
+            list.Add(new DiscoveredManifest
+            {
+                AppId = appId,
+                DepotId = depotId,
+                ManifestId = manifestId,
+                Branch = branch,
+                SourceId = SourceId
+            });
         }
     }
 
