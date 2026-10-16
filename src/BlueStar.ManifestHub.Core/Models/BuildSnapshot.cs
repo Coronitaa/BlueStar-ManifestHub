@@ -38,6 +38,37 @@ public sealed class BuildSnapshot
     [JsonPropertyName("depotManifests")]
     public IReadOnlyDictionary<uint, ulong> DepotManifests { get; init; } = new Dictionary<uint, ulong>();
 
+    private readonly string? _patchDate;
+
+    /// <summary>
+    /// Patch release date string (YYYY-MM-DD) or authentic date identifier.
+    /// Derived automatically from CreationTime or Timestamp if not explicitly set.
+    /// </summary>
+    [JsonPropertyName("patchDate")]
+    public string PatchDate
+    {
+        get
+        {
+            if (!string.IsNullOrEmpty(_patchDate))
+                return _patchDate;
+
+            if (CreationTime.HasValue)
+                return CreationTime.Value.UtcDateTime.ToString("yyyy-MM-dd");
+
+            if (Timestamp > DateTimeOffset.UnixEpoch)
+                return Timestamp.UtcDateTime.ToString("yyyy-MM-dd");
+
+            return string.Empty;
+        }
+        init => _patchDate = value;
+    }
+
+    /// <summary>
+    /// Explicit list of DepotIds whose ManifestId changed or was introduced compared to the chronologically preceding build snapshot.
+    /// </summary>
+    [JsonPropertyName("changedDepots")]
+    public IReadOnlyList<uint> ChangedDepots { get; init; } = Array.Empty<uint>();
+
     /// <summary>
     /// Display date string for UI/CLI presentation. Displays "Fecha desconocida" / "Unknown date" when no authentic date exists.
     /// </summary>

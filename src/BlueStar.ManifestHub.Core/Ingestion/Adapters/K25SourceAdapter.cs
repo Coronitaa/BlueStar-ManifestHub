@@ -33,11 +33,13 @@ public sealed class K25SourceAdapter : IManifestSourceAdapter, IDisposable
     private readonly object _stateLock = new();
     private readonly ConcurrentDictionary<uint, List<DiscoveredManifest>> _knownDepotManifests = new();
     private readonly ConcurrentDictionary<(uint DepotId, ulong ManifestId), DiscoveredManifest> _allKnownManifests = new();
+    private readonly IGlobalRateGovernor? _rateGovernor;
     private bool _disposed;
 
-    public K25SourceAdapter(K25Options? options = null, HttpClient? httpClient = null)
+    public K25SourceAdapter(K25Options? options = null, HttpClient? httpClient = null, IGlobalRateGovernor? rateGovernor = null)
     {
         _options = options ?? new K25Options();
+        _rateGovernor = rateGovernor;
         if (httpClient != null)
         {
             _httpClient = httpClient;
@@ -48,6 +50,11 @@ public sealed class K25SourceAdapter : IManifestSourceAdapter, IDisposable
             _httpClient = new HttpClient { Timeout = _options.Timeout };
             _disposeClient = true;
         }
+    }
+
+    public K25SourceAdapter(IGlobalRateGovernor rateGovernor, K25Options? options = null, HttpClient? httpClient = null)
+        : this(options, httpClient, rateGovernor)
+    {
     }
 
     public string SourceId => "K25";
@@ -90,13 +97,14 @@ public sealed class K25SourceAdapter : IManifestSourceAdapter, IDisposable
         }
     }
 
-    private void RecordSuccess()
+    private void RecordSuccess(CancellationToken cancellationToken = default)
     {
         lock (_stateLock)
         {
             _consecutiveFailures = 0;
             _cooldownUntil = DateTimeOffset.MinValue;
         }
+        _rateGovernor?.ReportSuccessAsync(cancellationToken);
     }
 
     private void RecordFailure()
@@ -109,6 +117,50 @@ public sealed class K25SourceAdapter : IManifestSourceAdapter, IDisposable
                 _cooldownUntil = DateTimeOffset.UtcNow.AddMinutes(1);
             }
         }
+    }
+
+    private void RecordRateLimitExceeded(TimeSpan? retryAfter, CancellationToken cancellationToken = default)
+    {
+        lock (_stateLock)
+        {
+            _consecutiveFailures++;
+            var cooldown = retryAfter ?? TimeSpan.FromSeconds(Math.Min(60, 5 * Math.Pow(2, Math.Min(_consecutiveFailures, 4))));
+            _cooldownUntil = DateTimeOffset.UtcNow + cooldown;
+        }
+        _rateGovernor?.ReportRateLimitExceededAsync(retryAfter, cancellationToken);
+    }
+
+    private static TimeSpan? ParseRetryAfter(HttpResponseMessage response)
+    {
+        if (response.Headers.RetryAfter != null)
+        {
+            if (response.Headers.RetryAfter.Delta.HasValue)
+            {
+                return response.Headers.RetryAfter.Delta.Value;
+            }
+
+            if (response.Headers.RetryAfter.Date.HasValue)
+            {
+                var delay = response.Headers.RetryAfter.Date.Value - DateTimeOffset.UtcNow;
+                return delay > TimeSpan.Zero ? delay : TimeSpan.FromSeconds(1);
+            }
+        }
+
+        if (response.Headers.TryGetValues("X-RateLimit-Reset", out var resetValues))
+        {
+            var val = resetValues.FirstOrDefault();
+            if (long.TryParse(val, out long epochSeconds))
+            {
+                var resetTime = DateTimeOffset.FromUnixTimeSeconds(epochSeconds);
+                var diff = resetTime - DateTimeOffset.UtcNow;
+                if (diff > TimeSpan.Zero)
+                {
+                    return diff;
+                }
+            }
+        }
+
+        return null;
     }
 
     /// <inheritdoc />
@@ -127,25 +179,46 @@ public sealed class K25SourceAdapter : IManifestSourceAdapter, IDisposable
             return _allKnownManifests.Values.Where(m => m.AppId == appId).ToList();
         }
 
+        if (_rateGovernor != null)
+        {
+            await _rateGovernor.WaitAsync(cancellationToken);
+        }
+
         string url = _options.AppMetadataUrlTemplate
             .Replace("{baseUrl}", _options.BaseUrl.TrimEnd('/'))
             .Replace("{appId}", appId.ToString());
 
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        linkedCts.CancelAfter(_options.Timeout);
+
         try
         {
-            using var response = await _httpClient.GetAsync(url, cancellationToken);
+            using var response = await _httpClient.GetAsync(url, linkedCts.Token);
             if (response.StatusCode == HttpStatusCode.NotFound)
             {
-                RecordSuccess();
+                RecordSuccess(cancellationToken);
                 var matching = _allKnownManifests.Values.Where(m => m.AppId == appId).ToList();
                 return matching;
             }
 
-            response.EnsureSuccessStatusCode();
-            RecordSuccess();
+            if (response.StatusCode == (HttpStatusCode)429 ||
+                (response.StatusCode == HttpStatusCode.Forbidden && response.Headers.TryGetValues("X-RateLimit-Remaining", out var rem) && rem.FirstOrDefault() == "0"))
+            {
+                var retryAfter = ParseRetryAfter(response);
+                RecordRateLimitExceeded(retryAfter, cancellationToken);
+                return _allKnownManifests.Values.Where(m => m.AppId == appId).ToList();
+            }
 
-            string json = await response.Content.ReadAsStringAsync(cancellationToken);
+            response.EnsureSuccessStatusCode();
+            RecordSuccess(cancellationToken);
+
+            string json = await response.Content.ReadAsStringAsync(linkedCts.Token);
             return ParseK25Json(appId, 0, json);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            RecordFailure();
+            return _allKnownManifests.Values.Where(m => m.AppId == appId).ToList();
         }
         catch (HttpRequestException)
         {
@@ -178,17 +251,25 @@ public sealed class K25SourceAdapter : IManifestSourceAdapter, IDisposable
         // 2. Query Depot metadata url if configured
         if (!string.IsNullOrWhiteSpace(_options.DepotMetadataUrlTemplate))
         {
+            if (_rateGovernor != null)
+            {
+                await _rateGovernor.WaitAsync(cancellationToken);
+            }
+
             string url = _options.DepotMetadataUrlTemplate
                 .Replace("{baseUrl}", _options.BaseUrl.TrimEnd('/'))
                 .Replace("{depotId}", depotId.ToString());
 
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            linkedCts.CancelAfter(_options.Timeout);
+
             try
             {
-                using var response = await _httpClient.GetAsync(url, cancellationToken);
+                using var response = await _httpClient.GetAsync(url, linkedCts.Token);
                 if (response.IsSuccessStatusCode)
                 {
-                    RecordSuccess();
-                    string json = await response.Content.ReadAsStringAsync(cancellationToken);
+                    RecordSuccess(cancellationToken);
+                    string json = await response.Content.ReadAsStringAsync(linkedCts.Token);
                     var parsed = ParseK25Json(0, depotId, json);
                     if (parsed.Count > 0)
                     {
@@ -209,8 +290,18 @@ public sealed class K25SourceAdapter : IManifestSourceAdapter, IDisposable
                 }
                 else if (response.StatusCode == HttpStatusCode.NotFound)
                 {
-                    RecordSuccess();
+                    RecordSuccess(cancellationToken);
                 }
+                else if (response.StatusCode == (HttpStatusCode)429 ||
+                    (response.StatusCode == HttpStatusCode.Forbidden && response.Headers.TryGetValues("X-RateLimit-Remaining", out var rem) && rem.FirstOrDefault() == "0"))
+                {
+                    var retryAfter = ParseRetryAfter(response);
+                    RecordRateLimitExceeded(retryAfter, cancellationToken);
+                }
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                RecordFailure();
             }
             catch (HttpRequestException)
             {
@@ -221,13 +312,21 @@ public sealed class K25SourceAdapter : IManifestSourceAdapter, IDisposable
         // 3. Query Tree API / index if configured
         if (!string.IsNullOrWhiteSpace(_options.TreeApiUrlTemplate))
         {
+            if (_rateGovernor != null)
+            {
+                await _rateGovernor.WaitAsync(cancellationToken);
+            }
+
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            linkedCts.CancelAfter(_options.Timeout);
+
             try
             {
-                using var response = await _httpClient.GetAsync(_options.TreeApiUrlTemplate, cancellationToken);
+                using var response = await _httpClient.GetAsync(_options.TreeApiUrlTemplate, linkedCts.Token);
                 if (response.IsSuccessStatusCode)
                 {
-                    RecordSuccess();
-                    string json = await response.Content.ReadAsStringAsync(cancellationToken);
+                    RecordSuccess(cancellationToken);
+                    string json = await response.Content.ReadAsStringAsync(linkedCts.Token);
                     var parsed = ParseTreeJson(json, depotId);
                     if (parsed.Count > 0)
                     {
@@ -236,8 +335,18 @@ public sealed class K25SourceAdapter : IManifestSourceAdapter, IDisposable
                 }
                 else if (response.StatusCode == HttpStatusCode.NotFound)
                 {
-                    RecordSuccess();
+                    RecordSuccess(cancellationToken);
                 }
+                else if (response.StatusCode == (HttpStatusCode)429 ||
+                    (response.StatusCode == HttpStatusCode.Forbidden && response.Headers.TryGetValues("X-RateLimit-Remaining", out var rem) && rem.FirstOrDefault() == "0"))
+                {
+                    var retryAfter = ParseRetryAfter(response);
+                    RecordRateLimitExceeded(retryAfter, cancellationToken);
+                }
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                RecordFailure();
             }
             catch (HttpRequestException)
             {
@@ -267,24 +376,45 @@ public sealed class K25SourceAdapter : IManifestSourceAdapter, IDisposable
         if (!IsAvailable)
             return null;
 
+        if (_rateGovernor != null)
+        {
+            await _rateGovernor.WaitAsync(cancellationToken);
+        }
+
         string url = _options.ManifestUrlTemplate
             .Replace("{baseUrl}", _options.BaseUrl.TrimEnd('/'))
             .Replace("{depotId}", depotId.ToString())
             .Replace("{manifestId}", manifestId.ToString());
 
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        linkedCts.CancelAfter(_options.Timeout);
+
         try
         {
-            using var response = await _httpClient.GetAsync(url, cancellationToken);
+            using var response = await _httpClient.GetAsync(url, linkedCts.Token);
             if (response.StatusCode == HttpStatusCode.NotFound)
             {
-                RecordSuccess();
+                RecordSuccess(cancellationToken);
+                return null;
+            }
+
+            if (response.StatusCode == (HttpStatusCode)429 ||
+                (response.StatusCode == HttpStatusCode.Forbidden && response.Headers.TryGetValues("X-RateLimit-Remaining", out var rem) && rem.FirstOrDefault() == "0"))
+            {
+                var retryAfter = ParseRetryAfter(response);
+                RecordRateLimitExceeded(retryAfter, cancellationToken);
                 return null;
             }
 
             response.EnsureSuccessStatusCode();
-            RecordSuccess();
+            RecordSuccess(cancellationToken);
 
-            return await response.Content.ReadAsByteArrayAsync(cancellationToken);
+            return await response.Content.ReadAsByteArrayAsync(linkedCts.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            RecordFailure();
+            return null;
         }
         catch (HttpRequestException)
         {

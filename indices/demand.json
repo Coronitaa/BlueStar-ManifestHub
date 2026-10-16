@@ -1,0 +1,39 @@
+{
+  "schemaVersion": "v1",
+  "lastUpdated": "2026-10-16T18:01:58.2668511+00:00",
+  "totalMissing": 1,
+  "demands": {
+    "10:142:8052183366346984139": {
+      "schemaVersion": "v1",
+      "appId": 10,
+      "depotId": 142,
+      "manifestId": 8052183366346984139,
+      "stardustReward": 100,
+      "detectedAt": "2026-10-16T18:01:58.2659026+00:00"
+    }
+  },
+  "apps": {
+    "10": {
+      "142": [
+        {
+          "schemaVersion": "v1",
+          "appId": 10,
+          "depotId": 142,
+          "manifestId": 8052183366346984139,
+          "stardustReward": 100,
+          "detectedAt": "2026-10-16T18:01:58.2659026+00:00"
+        }
+      ]
+    }
+  },
+  "items": [
+    {
+      "schemaVersion": "v1",
+      "appId": 10,
+      "depotId": 142,
+      "manifestId": 8052183366346984139,
+      "stardustReward": 100,
+      "detectedAt": "2026-10-16T18:01:58.2659026+00:00"
+    }
+  ]
+}

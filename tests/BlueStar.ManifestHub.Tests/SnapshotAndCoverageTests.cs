@@ -145,4 +145,37 @@ public class SnapshotAndCoverageTests : IDisposable
         Assert.Equal(manifestId, depotRecord.LatestManifestId);
         Assert.Contains(manifestId, depotRecord.ManifestIds);
     }
+
+    [Fact]
+    public async Task GenerateBatchSnapshotsAsync_GeneratesAndMirrorsToSnapshotsFolder()
+    {
+        uint appId = 730;
+        uint depotId = 731;
+        ulong manifestId = 888999111UL;
+
+        // Ensure directories exist
+        Assert.True(Directory.Exists(_storage.GetSnapshotsDirectory()));
+
+        await _storage.RegisterAppAsync(new AppRecord
+        {
+            AppId = appId,
+            Name = "Counter-Strike 2",
+            DepotIds = new List<uint> { depotId }
+        });
+
+        await _storage.PublishManifestAsync(TestManifestHelper.CreateValidManifest(depotId, manifestId), depotId, manifestId);
+
+        int count = await _storage.GenerateBatchSnapshotsAsync(new[] { appId });
+        Assert.Equal(1, count);
+
+        string buildFile = _storage.GetBuildSnapshotPath(appId);
+        string snapshotFile = _storage.GetSnapshotPath(appId);
+
+        Assert.True(File.Exists(buildFile));
+        Assert.True(File.Exists(snapshotFile));
+
+        var snapshots = await _storage.GetBuildSnapshotsAsync(appId);
+        Assert.Single(snapshots);
+        Assert.Equal(manifestId, snapshots[0].DepotManifests[depotId]);
+    }
 }

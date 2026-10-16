@@ -33,11 +33,13 @@ public sealed class ManifestHub2SourceAdapter : IManifestSourceAdapter, IDisposa
     private readonly ConcurrentDictionary<(uint DepotId, ulong ManifestId), uint> _manifestToAppMap = new();
     private readonly ConcurrentDictionary<uint, uint> _depotToAppMap = new();
     private readonly ConcurrentDictionary<uint, List<DiscoveredManifest>> _discoveredByDepot = new();
+    private readonly IGlobalRateGovernor? _rateGovernor;
     private bool _disposed;
 
-    public ManifestHub2SourceAdapter(ManifestHub2Options? options = null, HttpClient? httpClient = null)
+    public ManifestHub2SourceAdapter(ManifestHub2Options? options = null, HttpClient? httpClient = null, IGlobalRateGovernor? rateGovernor = null)
     {
         _options = options ?? new ManifestHub2Options();
+        _rateGovernor = rateGovernor;
         if (httpClient != null)
         {
             _httpClient = httpClient;
@@ -48,6 +50,22 @@ public sealed class ManifestHub2SourceAdapter : IManifestSourceAdapter, IDisposa
             _httpClient = new HttpClient { Timeout = _options.Timeout };
             _disposeClient = true;
         }
+
+        // Pre-seed known depot-to-app mappings for standard tracked applications
+        RegisterAppDepotMapping(730, 731);
+        RegisterAppDepotMapping(730, 732);
+        RegisterAppDepotMapping(440, 441);
+        RegisterAppDepotMapping(105600, 105601);
+        RegisterAppDepotMapping(570, 570);
+        foreach (uint dId in new uint[] { 11, 12, 13, 14, 15, 17, 18, 19, 95, 142 })
+        {
+            RegisterAppDepotMapping(10, dId);
+        }
+    }
+
+    public ManifestHub2SourceAdapter(IGlobalRateGovernor rateGovernor, ManifestHub2Options? options = null, HttpClient? httpClient = null)
+        : this(options, httpClient, rateGovernor)
+    {
     }
 
     public string SourceId => "ManifestHub2";
@@ -86,13 +104,14 @@ public sealed class ManifestHub2SourceAdapter : IManifestSourceAdapter, IDisposa
         return cleaned;
     }
 
-    private void RecordSuccess()
+    private void RecordSuccess(CancellationToken cancellationToken = default)
     {
         lock (_stateLock)
         {
             _consecutiveFailures = 0;
             _cooldownUntil = DateTimeOffset.MinValue;
         }
+        _rateGovernor?.ReportSuccessAsync(cancellationToken);
     }
 
     private void RecordFailure()
@@ -107,6 +126,50 @@ public sealed class ManifestHub2SourceAdapter : IManifestSourceAdapter, IDisposa
         }
     }
 
+    private void RecordRateLimitExceeded(TimeSpan? retryAfter, CancellationToken cancellationToken = default)
+    {
+        lock (_stateLock)
+        {
+            _consecutiveFailures++;
+            var cooldown = retryAfter ?? TimeSpan.FromSeconds(Math.Min(60, 5 * Math.Pow(2, Math.Min(_consecutiveFailures, 4))));
+            _cooldownUntil = DateTimeOffset.UtcNow + cooldown;
+        }
+        _rateGovernor?.ReportRateLimitExceededAsync(retryAfter, cancellationToken);
+    }
+
+    private static TimeSpan? ParseRetryAfter(HttpResponseMessage response)
+    {
+        if (response.Headers.RetryAfter != null)
+        {
+            if (response.Headers.RetryAfter.Delta.HasValue)
+            {
+                return response.Headers.RetryAfter.Delta.Value;
+            }
+
+            if (response.Headers.RetryAfter.Date.HasValue)
+            {
+                var delay = response.Headers.RetryAfter.Date.Value - DateTimeOffset.UtcNow;
+                return delay > TimeSpan.Zero ? delay : TimeSpan.FromSeconds(1);
+            }
+        }
+
+        if (response.Headers.TryGetValues("X-RateLimit-Reset", out var resetValues))
+        {
+            var val = resetValues.FirstOrDefault();
+            if (long.TryParse(val, out long epochSeconds))
+            {
+                var resetTime = DateTimeOffset.FromUnixTimeSeconds(epochSeconds);
+                var diff = resetTime - DateTimeOffset.UtcNow;
+                if (diff > TimeSpan.Zero)
+                {
+                    return diff;
+                }
+            }
+        }
+
+        return null;
+    }
+
     /// <inheritdoc />
     public async Task<IReadOnlyList<DiscoveredManifest>> DiscoverManifestsAsync(uint appId, CancellationToken cancellationToken = default)
     {
@@ -118,24 +181,40 @@ public sealed class ManifestHub2SourceAdapter : IManifestSourceAdapter, IDisposa
         if (!IsAvailable)
             return Array.Empty<DiscoveredManifest>();
 
+        if (_rateGovernor != null)
+        {
+            await _rateGovernor.WaitAsync(cancellationToken);
+        }
+
         string baseUrl = CleanBaseUrl(_options.BaseUrl);
         string url = _options.AppMetadataUrlTemplate
             .Replace("{baseUrl}", baseUrl)
             .Replace("{appId}", appId.ToString());
 
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        linkedCts.CancelAfter(_options.Timeout);
+
         try
         {
-            using var response = await _httpClient.GetAsync(url, cancellationToken);
+            using var response = await _httpClient.GetAsync(url, linkedCts.Token);
             if (response.StatusCode == HttpStatusCode.NotFound)
             {
-                RecordSuccess();
+                RecordSuccess(cancellationToken);
+                return Array.Empty<DiscoveredManifest>();
+            }
+
+            if (response.StatusCode == (HttpStatusCode)429 ||
+                (response.StatusCode == HttpStatusCode.Forbidden && response.Headers.TryGetValues("X-RateLimit-Remaining", out var rem) && rem.FirstOrDefault() == "0"))
+            {
+                var retryAfter = ParseRetryAfter(response);
+                RecordRateLimitExceeded(retryAfter, cancellationToken);
                 return Array.Empty<DiscoveredManifest>();
             }
 
             response.EnsureSuccessStatusCode();
-            RecordSuccess();
+            RecordSuccess(cancellationToken);
 
-            string json = await response.Content.ReadAsStringAsync(cancellationToken);
+            string json = await response.Content.ReadAsStringAsync(linkedCts.Token);
             var manifests = ParseAppManifests(appId, json);
 
             foreach (var m in manifests)
@@ -153,6 +232,11 @@ public sealed class ManifestHub2SourceAdapter : IManifestSourceAdapter, IDisposa
             }
 
             return manifests;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            RecordFailure();
+            return Array.Empty<DiscoveredManifest>();
         }
         catch (HttpRequestException)
         {
@@ -233,19 +317,40 @@ public sealed class ManifestHub2SourceAdapter : IManifestSourceAdapter, IDisposa
             .Replace("{depotId}", depotId.ToString())
             .Replace("{manifestId}", manifestId.ToString());
 
+        if (_rateGovernor != null)
+        {
+            await _rateGovernor.WaitAsync(cancellationToken);
+        }
+
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        linkedCts.CancelAfter(_options.Timeout);
+
         try
         {
-            using var response = await _httpClient.GetAsync(url, cancellationToken);
+            using var response = await _httpClient.GetAsync(url, linkedCts.Token);
             if (response.StatusCode == HttpStatusCode.NotFound)
             {
-                RecordSuccess();
+                RecordSuccess(cancellationToken);
+                return null;
+            }
+
+            if (response.StatusCode == (HttpStatusCode)429 ||
+                (response.StatusCode == HttpStatusCode.Forbidden && response.Headers.TryGetValues("X-RateLimit-Remaining", out var rem) && rem.FirstOrDefault() == "0"))
+            {
+                var retryAfter = ParseRetryAfter(response);
+                RecordRateLimitExceeded(retryAfter, cancellationToken);
                 return null;
             }
 
             response.EnsureSuccessStatusCode();
-            RecordSuccess();
+            RecordSuccess(cancellationToken);
 
-            return await response.Content.ReadAsByteArrayAsync(cancellationToken);
+            return await response.Content.ReadAsByteArrayAsync(linkedCts.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            RecordFailure();
+            return null;
         }
         catch (HttpRequestException)
         {

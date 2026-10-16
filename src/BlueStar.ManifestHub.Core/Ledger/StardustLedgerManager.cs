@@ -33,6 +33,9 @@ public sealed class StardustLedgerManager
     public string LedgerFilePath =>
         Path.Combine(_options.BasePath, _options.LedgerDirectoryName, "stardust-ledger.jsonl");
 
+    public string StardustJsonPath =>
+        Path.Combine(_options.BasePath, _options.LedgerDirectoryName, "stardust.json");
+
     /// <summary>
     /// Awards Stardust points for a validated manifest revision.
     /// Strict requirements:
@@ -108,9 +111,12 @@ public sealed class StardustLedgerManager
                 EntryHash = entryHash
             };
 
-            // 6. Append to immutable ledger JSONL
+            // 6. Append to immutable ledger JSONL and persist to ledger/stardust.json
             string jsonLine = HubJsonSerializer.SerializeCompact(newEntry) + Environment.NewLine;
             await File.AppendAllTextAsync(LedgerFilePath, jsonLine, cancellationToken);
+
+            entries.Add(newEntry);
+            await File.WriteAllTextAsync(StardustJsonPath, HubJsonSerializer.Serialize(entries), cancellationToken);
 
             return newEntry;
         }
@@ -179,7 +185,7 @@ public sealed class StardustLedgerManager
     /// </summary>
     public async Task<LedgerIntegrityResult> VerifyIntegrityAsync(CancellationToken cancellationToken = default)
     {
-        if (!File.Exists(LedgerFilePath))
+        if (!File.Exists(LedgerFilePath) && !File.Exists(StardustJsonPath))
         {
             return LedgerIntegrityResult.Success(0, GenesisHash);
         }
@@ -187,59 +193,101 @@ public sealed class StardustLedgerManager
         await _ledgerLock.WaitAsync(cancellationToken);
         try
         {
-            var lines = await File.ReadAllLinesAsync(LedgerFilePath, cancellationToken);
-            string expectedPreviousHash = GenesisHash;
-
-            for (int i = 0; i < lines.Length; i++)
+            if (File.Exists(LedgerFilePath))
             {
-                string line = lines[i].Trim();
-                if (string.IsNullOrEmpty(line))
-                    continue;
+                var lines = await File.ReadAllLinesAsync(LedgerFilePath, cancellationToken);
+                string expectedPreviousHash = GenesisHash;
 
-                StardustLedgerEntry? entry;
-                try
+                for (int i = 0; i < lines.Length; i++)
                 {
-                    entry = HubJsonSerializer.Deserialize<StardustLedgerEntry>(line);
-                }
-                catch (Exception ex)
-                {
-                    return LedgerIntegrityResult.Failure($"Corrupt JSON on line {i + 1}: {ex.Message}", i);
+                    string line = lines[i].Trim();
+                    if (string.IsNullOrEmpty(line))
+                        continue;
+
+                    StardustLedgerEntry? entry;
+                    try
+                    {
+                        entry = HubJsonSerializer.Deserialize<StardustLedgerEntry>(line);
+                    }
+                    catch (Exception ex)
+                    {
+                        return LedgerIntegrityResult.Failure($"Corrupt JSON on line {i + 1}: {ex.Message}", i);
+                    }
+
+                    if (entry == null)
+                    {
+                        return LedgerIntegrityResult.Failure($"Null entry on line {i + 1}.", i);
+                    }
+
+                    if (!string.Equals(entry.PreviousHash, expectedPreviousHash, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return LedgerIntegrityResult.Failure(
+                            $"Broken hash chain at line {i + 1}: Expected PreviousHash '{expectedPreviousHash}', found '{entry.PreviousHash}'.",
+                            i,
+                            entry.PreviousHash);
+                    }
+
+                    string computedHash = ComputeEntryHash(
+                        entry.PreviousHash,
+                        entry.TransactionId,
+                        entry.ContributorPseudonym,
+                        entry.ArtifactKey,
+                        entry.Points,
+                        entry.Timestamp,
+                        entry.Reason);
+
+                    if (!string.Equals(entry.EntryHash, computedHash, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return LedgerIntegrityResult.Failure(
+                            $"Hash tampering detected at line {i + 1}: Stored EntryHash '{entry.EntryHash}', computed '{computedHash}'.",
+                            i,
+                            entry.EntryHash);
+                    }
+
+                    expectedPreviousHash = entry.EntryHash;
                 }
 
-                if (entry == null)
-                {
-                    return LedgerIntegrityResult.Failure($"Null entry on line {i + 1}.", i);
-                }
-
-                if (!string.Equals(entry.PreviousHash, expectedPreviousHash, StringComparison.OrdinalIgnoreCase))
-                {
-                    return LedgerIntegrityResult.Failure(
-                        $"Broken hash chain at line {i + 1}: Expected PreviousHash '{expectedPreviousHash}', found '{entry.PreviousHash}'.",
-                        i,
-                        entry.PreviousHash);
-                }
-
-                string computedHash = ComputeEntryHash(
-                    entry.PreviousHash,
-                    entry.TransactionId,
-                    entry.ContributorPseudonym,
-                    entry.ArtifactKey,
-                    entry.Points,
-                    entry.Timestamp,
-                    entry.Reason);
-
-                if (!string.Equals(entry.EntryHash, computedHash, StringComparison.OrdinalIgnoreCase))
-                {
-                    return LedgerIntegrityResult.Failure(
-                        $"Hash tampering detected at line {i + 1}: Stored EntryHash '{entry.EntryHash}', computed '{computedHash}'.",
-                        i,
-                        entry.EntryHash);
-                }
-
-                expectedPreviousHash = entry.EntryHash;
+                return LedgerIntegrityResult.Success(lines.Length, expectedPreviousHash);
             }
+            else
+            {
+                string json = await File.ReadAllTextAsync(StardustJsonPath, cancellationToken);
+                var entries = HubJsonSerializer.Deserialize<List<StardustLedgerEntry>>(json) ?? new List<StardustLedgerEntry>();
+                string expectedPreviousHash = GenesisHash;
 
-            return LedgerIntegrityResult.Success(lines.Length, expectedPreviousHash);
+                for (int i = 0; i < entries.Count; i++)
+                {
+                    var entry = entries[i];
+                    if (!string.Equals(entry.PreviousHash, expectedPreviousHash, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return LedgerIntegrityResult.Failure(
+                            $"Broken hash chain at entry {i + 1}: Expected PreviousHash '{expectedPreviousHash}', found '{entry.PreviousHash}'.",
+                            i,
+                            entry.PreviousHash);
+                    }
+
+                    string computedHash = ComputeEntryHash(
+                        entry.PreviousHash,
+                        entry.TransactionId,
+                        entry.ContributorPseudonym,
+                        entry.ArtifactKey,
+                        entry.Points,
+                        entry.Timestamp,
+                        entry.Reason);
+
+                    if (!string.Equals(entry.EntryHash, computedHash, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return LedgerIntegrityResult.Failure(
+                            $"Hash tampering detected at entry {i + 1}: Stored EntryHash '{entry.EntryHash}', computed '{computedHash}'.",
+                            i,
+                            entry.EntryHash);
+                    }
+
+                    expectedPreviousHash = entry.EntryHash;
+                }
+
+                return LedgerIntegrityResult.Success(entries.Count, expectedPreviousHash);
+            }
         }
         finally
         {
@@ -286,21 +334,33 @@ public sealed class StardustLedgerManager
     private async Task<List<StardustLedgerEntry>> ReadAllEntriesInternalAsync(CancellationToken cancellationToken)
     {
         var list = new List<StardustLedgerEntry>();
-        if (!File.Exists(LedgerFilePath))
-            return list;
-
-        string[] lines = await File.ReadAllLinesAsync(LedgerFilePath, cancellationToken);
-        foreach (string line in lines)
+        if (File.Exists(LedgerFilePath))
         {
-            if (string.IsNullOrWhiteSpace(line))
-                continue;
-
-            var entry = HubJsonSerializer.Deserialize<StardustLedgerEntry>(line.Trim());
-            if (entry != null)
+            string[] lines = await File.ReadAllLinesAsync(LedgerFilePath, cancellationToken);
+            foreach (string line in lines)
             {
-                list.Add(entry);
+                if (string.IsNullOrWhiteSpace(line))
+                    continue;
+
+                var entry = HubJsonSerializer.Deserialize<StardustLedgerEntry>(line.Trim());
+                if (entry != null)
+                {
+                    list.Add(entry);
+                }
+            }
+            return list;
+        }
+
+        if (File.Exists(StardustJsonPath))
+        {
+            string json = await File.ReadAllTextAsync(StardustJsonPath, cancellationToken);
+            var entries = HubJsonSerializer.Deserialize<List<StardustLedgerEntry>>(json);
+            if (entries != null)
+            {
+                return entries;
             }
         }
+
         return list;
     }
 }

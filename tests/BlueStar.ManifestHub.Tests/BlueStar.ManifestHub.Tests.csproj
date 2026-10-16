@@ -26,6 +26,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\BlueStar.ManifestHub.Core\BlueStar.ManifestHub.Core.csproj" />
+    <ProjectReference Include="..\..\src\BlueStar.ManifestHub.Cli\BlueStar.ManifestHub.Cli.csproj" />
   </ItemGroup>
 
 </Project>

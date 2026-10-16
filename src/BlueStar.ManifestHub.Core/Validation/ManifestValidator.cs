@@ -38,6 +38,18 @@ public sealed class ManifestValidator
     };
 
     /// <summary>
+    /// Checks whether the byte sequence begins with or contains the Steam Protobuf magic header (0x71F617D0).
+    /// Accepts Little-Endian (0xD0, 0x17, 0xF6, 0x71) and Big-Endian (0x71, 0xF6, 0x17, 0xD0).
+    /// </summary>
+    public static bool HasSteamProtobufMagic(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.Length < 4) return false;
+        uint le = BinaryPrimitives.ReadUInt32LittleEndian(bytes[..4]);
+        uint be = BinaryPrimitives.ReadUInt32BigEndian(bytes[..4]);
+        return le == ManifestPayloadMagic || be == ManifestPayloadMagic;
+    }
+
+    /// <summary>
     /// Validates a manifest byte buffer.
     /// </summary>
     public ManifestValidationResult Validate(
@@ -135,6 +147,12 @@ public sealed class ManifestValidator
                     decompressedPayload = outerPayload ?? decompressedOuter;
                     activeBytes = decompressedOuter;
                 }
+                else if (HasSteamProtobufMagic(decompressedOuter))
+                {
+                    magicFound = true;
+                    decompressedPayload = decompressedOuter;
+                    activeBytes = decompressedOuter;
+                }
             }
         }
 
@@ -142,7 +160,7 @@ public sealed class ManifestValidator
         {
             return ManifestValidationResult.Failure(
                 ManifestStatus.Corrupted,
-                $"Missing required Steam depot manifest magic header 0x{ManifestPayloadMagic:X8} or payload section is truncated/corrupt.",
+                $"Missing required Steam depot manifest magic header 0x{ManifestPayloadMagic:X8} (0xD0, 0x17, 0xF6, 0x71) or payload section is truncated/corrupt.",
                 expectedDepotId,
                 expectedManifestId,
                 sha256,
@@ -265,8 +283,21 @@ public sealed class ManifestValidator
         int offset = 0;
         while (offset + 8 <= data.Length)
         {
-            uint magic = BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(offset, 4));
-            uint length = BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(offset + 4, 4));
+            uint magicLe = BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(offset, 4));
+            uint magicBe = BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(offset, 4));
+            bool isPayloadMagic = magicLe == ManifestPayloadMagic || magicBe == ManifestPayloadMagic;
+            bool isMetadataMagic = magicLe == ManifestMetadataMagic || magicBe == ManifestMetadataMagic;
+            bool isEndOfManifestMagic = magicLe == ManifestEndOfManifestMagic || magicBe == ManifestEndOfManifestMagic;
+
+            if (!isPayloadMagic && !isMetadataMagic && !isEndOfManifestMagic)
+            {
+                break;
+            }
+
+            uint length = (magicLe == ManifestPayloadMagic || magicLe == ManifestMetadataMagic || magicLe == ManifestEndOfManifestMagic)
+                ? BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(offset + 4, 4))
+                : BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(offset + 4, 4));
+
             offset += 8;
 
             if ((ulong)offset + length > (ulong)data.Length)
@@ -277,7 +308,7 @@ public sealed class ManifestValidator
 
             ReadOnlySpan<byte> sectionData = data.AsSpan(offset, (int)length);
 
-            if (magic == ManifestPayloadMagic)
+            if (isPayloadMagic)
             {
                 payloadMagicFound = true;
                 // Decompress payload if compressed with Deflate / ZLib
@@ -290,12 +321,18 @@ public sealed class ManifestValidator
                     decompressedPayload = sectionData.ToArray();
                 }
             }
-            else if (magic == ManifestMetadataMagic)
+            else if (isMetadataMagic)
             {
                 metadata = ProtobufMiniParser.ParseMetadata(sectionData);
             }
 
             offset += (int)length;
+        }
+
+        if (!payloadMagicFound && HasSteamProtobufMagic(data))
+        {
+            payloadMagicFound = true;
+            decompressedPayload = data.Length > 4 ? data[4..] : Array.Empty<byte>();
         }
 
         return payloadMagicFound;

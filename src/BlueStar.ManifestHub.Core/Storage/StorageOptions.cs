@@ -11,6 +11,7 @@ public sealed class StorageOptions
     public string BasePath { get; set; } = Directory.GetCurrentDirectory();
 
     public string ManifestsDirectoryName { get; set; } = "manifests";
+    public string SnapshotsDirectoryName { get; set; } = "snapshots";
     public string BuildsDirectoryName { get; set; } = "builds";
     public string IndicesDirectoryName { get; set; } = "indices";
     public string StagingDirectoryName { get; set; } = "staging";
