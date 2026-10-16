@@ -765,6 +765,81 @@ public sealed class AdapterTests : IDisposable
         Assert.Equal(callCountBefore, callCount); // no new HTTP requests made
     }
 
+    [Fact]
+    public async Task DepotBoxSourceAdapter_WhenApiKeyMissingAndRequired_CleanlySkips()
+    {
+        int callCount = 0;
+        var handler = new MockHttpMessageHandler((req, ct) =>
+        {
+            callCount++;
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+
+        using var client = new HttpClient(handler);
+        using var governor = new FileCoordinatedRateGovernor(new RateGovernorOptions
+        {
+            StateFilePath = Path.Combine(_testDir, "depotbox_gov_skip.json")
+        });
+
+        using var adapter = new DepotBoxSourceAdapter(
+            governor,
+            new DepotBoxOptions
+            {
+                ApiKey = null,
+                RequireApiKey = true
+            },
+            client);
+
+        Assert.False(adapter.IsAvailable);
+
+        var manifests = await adapter.DiscoverManifestsAsync(730);
+        Assert.Empty(manifests);
+
+        var depotManifests = await adapter.DiscoverManifestsForDepotAsync(731);
+        Assert.Empty(depotManifests);
+
+        var downloaded = await adapter.DownloadManifestAsync(731, 12345);
+        Assert.Null(downloaded);
+
+        Assert.Equal(0, callCount); // Zero network calls made
+    }
+
+    [Fact]
+    public async Task ManifestHub2SourceAdapter_Handles429RetryAfter_AppliesBackoff()
+    {
+        var handler = new MockHttpMessageHandler((req, ct) =>
+        {
+            var resp = new HttpResponseMessage((HttpStatusCode)429);
+            resp.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(30));
+            return resp;
+        });
+
+        using var client = new HttpClient(handler);
+        using var adapter = new ManifestHub2SourceAdapter(null, client);
+
+        var result = await adapter.DownloadManifestAsync(730, 731, 99999);
+        Assert.Null(result);
+        Assert.False(adapter.IsAvailable);
+    }
+
+    [Fact]
+    public async Task K25SourceAdapter_Handles429RetryAfter_AppliesBackoff()
+    {
+        var handler = new MockHttpMessageHandler((req, ct) =>
+        {
+            var resp = new HttpResponseMessage((HttpStatusCode)429);
+            resp.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(45));
+            return resp;
+        });
+
+        using var client = new HttpClient(handler);
+        using var adapter = new K25SourceAdapter(null, client);
+
+        var result = await adapter.DownloadManifestAsync(441, 11111);
+        Assert.Null(result);
+        Assert.False(adapter.IsAvailable);
+    }
+
     #endregion
 
     private sealed class MockHttpMessageHandler : HttpMessageHandler

@@ -28,6 +28,7 @@ public sealed class ManifestStorageManager
     public void EnsureDirectoryStructure()
     {
         Directory.CreateDirectory(Path.Combine(_options.BasePath, _options.ManifestsDirectoryName));
+        Directory.CreateDirectory(Path.Combine(_options.BasePath, _options.SnapshotsDirectoryName));
         Directory.CreateDirectory(Path.Combine(_options.BasePath, _options.BuildsDirectoryName));
         Directory.CreateDirectory(Path.Combine(_options.BasePath, _options.IndicesDirectoryName));
         Directory.CreateDirectory(Path.Combine(_options.BasePath, _options.StagingDirectoryName));
@@ -51,6 +52,12 @@ public sealed class ManifestStorageManager
     public string GetBuildSnapshotPath(uint appId) =>
         Path.Combine(_options.BasePath, _options.BuildsDirectoryName, $"{appId}.json");
 
+    public string GetSnapshotsDirectory() =>
+        Path.Combine(_options.BasePath, _options.SnapshotsDirectoryName);
+
+    public string GetSnapshotPath(uint appId) =>
+        Path.Combine(GetSnapshotsDirectory(), $"{appId}.json");
+
     public string GetDepotIndexPath() =>
         Path.Combine(_options.BasePath, _options.IndicesDirectoryName, "depots.json");
 
@@ -59,6 +66,9 @@ public sealed class ManifestStorageManager
 
     public string GetCoverageIndexPath() =>
         Path.Combine(_options.BasePath, _options.IndicesDirectoryName, "coverage.json");
+
+    public string GetDemandIndexPath() =>
+        Path.Combine(_options.BasePath, _options.IndicesDirectoryName, "demand.json");
 
     public string GetStagingDirectory() =>
         Path.Combine(_options.BasePath, _options.StagingDirectoryName);
@@ -269,16 +279,163 @@ public sealed class ManifestStorageManager
                 snapshots.Insert(0, snapshot);
             }
 
-            // Order by timestamp descending
-            snapshots.Sort((a, b) => b.Timestamp.CompareTo(a.Timestamp));
+            // Recompute deltas (ChangedDepots) across chronological order and order descending
+            snapshots = RecomputeDeltas(snapshots);
 
             string serialized = HubJsonSerializer.Serialize(snapshots);
             await File.WriteAllTextAsync(snapshotPath, serialized, cancellationToken);
+
+            string snapshotMirrorPath = GetSnapshotPath(snapshot.AppId);
+            await File.WriteAllTextAsync(snapshotMirrorPath, serialized, cancellationToken);
         }
         finally
         {
             _indexLock.Release();
         }
+    }
+
+    /// <summary>
+    /// Generates batch build snapshots across all tracked applications in the catalog (or specified app IDs).
+    /// Creates or updates builds/{appId}.json and mirrors to snapshots/{appId}.json.
+    /// </summary>
+    public async Task<int> GenerateBatchSnapshotsAsync(
+        IEnumerable<uint>? targetAppIds = null,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureDirectoryStructure();
+
+        var appIds = new HashSet<uint>();
+        if (targetAppIds != null)
+        {
+            foreach (var id in targetAppIds)
+            {
+                if (id > 0) appIds.Add(id);
+            }
+        }
+
+        if (appIds.Count == 0)
+        {
+            string appsPath = GetAppIndexPath();
+            if (File.Exists(appsPath))
+            {
+                try
+                {
+                    string json = await File.ReadAllTextAsync(appsPath, cancellationToken);
+                    var apps = HubJsonSerializer.Deserialize<Dictionary<string, AppRecord>>(json);
+                    if (apps != null)
+                    {
+                        foreach (var kvp in apps)
+                        {
+                            if (uint.TryParse(kvp.Key, out uint aId) && aId > 0)
+                            {
+                                appIds.Add(aId);
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+                    // Ignore parse error
+                }
+            }
+
+            if (appIds.Count == 0)
+            {
+                foreach (var app in DefaultBaseApps)
+                {
+                    appIds.Add(app.AppId);
+                }
+            }
+        }
+
+        int generatedCount = 0;
+        foreach (uint appId in appIds)
+        {
+            var existingSnapshots = await GetBuildSnapshotsAsync(appId, cancellationToken);
+            string snapshotPath = GetSnapshotPath(appId);
+            string buildPath = GetBuildSnapshotPath(appId);
+
+            if (existingSnapshots.Count > 0)
+            {
+                // Ensure mirrored in snapshots/
+                string json = HubJsonSerializer.Serialize(existingSnapshots);
+                await File.WriteAllTextAsync(snapshotPath, json, cancellationToken);
+                generatedCount++;
+                continue;
+            }
+
+            // If no existing snapshots in builds/, generate from available depot manifests
+            var appRecord = await GetAppRecordAsync(appId, cancellationToken);
+            var depotIds = new HashSet<uint>(appRecord?.DepotIds ?? Array.Empty<uint>());
+
+            var depotManifests = new Dictionary<uint, ulong>();
+            DateTimeOffset? bestTimestamp = null;
+
+            foreach (uint depotId in depotIds)
+            {
+                var depotRecord = await GetDepotRecordAsync(depotId, cancellationToken);
+                ulong manifestId = 0;
+                if (depotRecord?.LatestManifestId.HasValue == true)
+                {
+                    manifestId = depotRecord.LatestManifestId.Value;
+                }
+                else
+                {
+                    string depotDir = GetManifestDirectory(depotId);
+                    if (Directory.Exists(depotDir))
+                    {
+                        var files = Directory.GetFiles(depotDir, "*.manifest");
+                        foreach (var f in files)
+                        {
+                            string fname = Path.GetFileNameWithoutExtension(f);
+                            if (ulong.TryParse(fname, out ulong parsedId) && parsedId > 0)
+                            {
+                                manifestId = Math.Max(manifestId, parsedId);
+                            }
+                        }
+                    }
+                }
+
+                if (manifestId > 0)
+                {
+                    depotManifests[depotId] = manifestId;
+                    var rev = await GetManifestRevisionAsync(depotId, manifestId, cancellationToken);
+                    if (rev?.CreationTime.HasValue == true)
+                    {
+                        if (bestTimestamp == null || rev.CreationTime.Value > bestTimestamp.Value)
+                        {
+                            bestTimestamp = rev.CreationTime.Value;
+                        }
+                    }
+                }
+            }
+
+            if (depotManifests.Count > 0)
+            {
+                var snapshot = new BuildSnapshot
+                {
+                    AppId = appId,
+                    BuildId = 1,
+                    Timestamp = bestTimestamp ?? DateTimeOffset.UnixEpoch,
+                    CreationTime = bestTimestamp,
+                    Branch = "public",
+                    Description = $"Batch generated snapshot for App {appId}",
+                    DepotManifests = depotManifests
+                };
+
+                await SaveBuildSnapshotAsync(snapshot, cancellationToken);
+                generatedCount++;
+            }
+            else
+            {
+                if (!File.Exists(snapshotPath) && File.Exists(buildPath))
+                {
+                    File.Copy(buildPath, snapshotPath, overwrite: true);
+                }
+            }
+        }
+
+        return generatedCount;
     }
 
     /// <summary>
@@ -350,6 +507,97 @@ public sealed class ManifestStorageManager
     {
         var snapshots = await GetBuildSnapshotsAsync(appId, cancellationToken);
         return snapshots.Where(s => s.CreationTime.HasValue).ToList();
+    }
+
+    /// <summary>
+    /// Retrieves a build snapshot matching a specific patch date (YYYY-MM-DD).
+    /// </summary>
+    public async Task<BuildSnapshot?> GetSnapshotByPatchDateAsync(
+        uint appId,
+        string patchDate,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(patchDate))
+            return null;
+
+        var snapshots = await GetBuildSnapshotsAsync(appId, cancellationToken);
+        return snapshots.FirstOrDefault(s => string.Equals(s.PatchDate, patchDate.Trim(), StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Calculates the delta of DepotIds whose ManifestId changed or was introduced compared to the previous snapshot.
+    /// </summary>
+    public static IReadOnlyList<uint> ComputeDepotDelta(
+        IReadOnlyDictionary<uint, ulong>? previousDepots,
+        IReadOnlyDictionary<uint, ulong>? currentDepots)
+    {
+        if (currentDepots == null || currentDepots.Count == 0)
+            return Array.Empty<uint>();
+
+        if (previousDepots == null || previousDepots.Count == 0)
+            return currentDepots.Keys.OrderBy(k => k).ToList();
+
+        var changed = new List<uint>();
+        foreach (var (depotId, manifestId) in currentDepots)
+        {
+            if (!previousDepots.TryGetValue(depotId, out ulong prevManifestId) || prevManifestId != manifestId)
+            {
+                changed.Add(depotId);
+            }
+        }
+
+        changed.Sort();
+        return changed;
+    }
+
+    /// <summary>
+    /// Recomputes ChangedDepots deltas across a list of snapshots in chronological order,
+    /// returning them sorted descending by timestamp.
+    /// </summary>
+    public static List<BuildSnapshot> RecomputeDeltas(List<BuildSnapshot> snapshots)
+    {
+        if (snapshots == null || snapshots.Count == 0)
+            return new List<BuildSnapshot>();
+
+        // Sort ascending chronologically (earliest to latest)
+        var sortedAsc = snapshots
+            .OrderBy(s => s.CreationTime ?? s.Timestamp)
+            .ThenBy(s => s.BuildId)
+            .ToList();
+
+        var result = new List<BuildSnapshot>(sortedAsc.Count);
+        BuildSnapshot? prev = null;
+
+        foreach (var s in sortedAsc)
+        {
+            var changed = ComputeDepotDelta(prev?.DepotManifests, s.DepotManifests);
+
+            var updated = new BuildSnapshot
+            {
+                SchemaVersion = s.SchemaVersion,
+                AppId = s.AppId,
+                BuildId = s.BuildId,
+                Timestamp = s.Timestamp,
+                CreationTime = s.CreationTime,
+                Branch = s.Branch,
+                Description = s.Description,
+                DepotManifests = s.DepotManifests,
+                PatchDate = s.PatchDate,
+                ChangedDepots = changed
+            };
+
+            result.Add(updated);
+            prev = updated;
+        }
+
+        // Return sorted descending by timestamp to preserve existing storage ordering
+        result.Sort((a, b) =>
+        {
+            int cmp = b.Timestamp.CompareTo(a.Timestamp);
+            return cmp != 0 ? cmp : b.BuildId.CompareTo(a.BuildId);
+        });
+
+        return result;
     }
 
     #endregion
@@ -888,6 +1136,113 @@ public sealed class ManifestStorageManager
         }
 
         return count;
+    }
+
+    /// <summary>
+    /// Gets all registered application records from the catalog index.
+    /// </summary>
+    public async Task<IReadOnlyList<AppRecord>> GetAllAppRecordsAsync(CancellationToken cancellationToken = default)
+    {
+        string appIndexPath = GetAppIndexPath();
+        if (!File.Exists(appIndexPath))
+            return Array.Empty<AppRecord>();
+
+        await _indexLock.WaitAsync(cancellationToken);
+        try
+        {
+            string json = await File.ReadAllTextAsync(appIndexPath, cancellationToken);
+            var apps = HubJsonSerializer.Deserialize<Dictionary<string, AppRecord>>(json);
+            return apps != null ? apps.Values.ToList() : Array.Empty<AppRecord>();
+        }
+        finally
+        {
+            _indexLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Finds the application record associated with a given DepotId.
+    /// </summary>
+    public async Task<AppRecord?> GetAppRecordByDepotIdAsync(uint depotId, CancellationToken cancellationToken = default)
+    {
+        var apps = await GetAllAppRecordsAsync(cancellationToken);
+        return apps.FirstOrDefault(a => a.DepotIds != null && a.DepotIds.Contains(depotId));
+    }
+
+    #endregion
+
+    #region Demand Index
+
+    /// <summary>
+    /// Retrieves the current demand index from indices/demand.json, or null if it does not exist.
+    /// </summary>
+    public async Task<DemandIndex?> GetDemandIndexAsync(CancellationToken cancellationToken = default)
+    {
+        string demandPath = GetDemandIndexPath();
+        if (!File.Exists(demandPath))
+            return null;
+
+        await _indexLock.WaitAsync(cancellationToken);
+        try
+        {
+            string json = await File.ReadAllTextAsync(demandPath, cancellationToken);
+            return HubJsonSerializer.Deserialize<DemandIndex>(json);
+        }
+        finally
+        {
+            _indexLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Saves or overwrites the demand index to indices/demand.json.
+    /// </summary>
+    public async Task SaveDemandIndexAsync(DemandIndex index, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(index);
+        string demandPath = GetDemandIndexPath();
+
+        await _indexLock.WaitAsync(cancellationToken);
+        try
+        {
+            string json = HubJsonSerializer.Serialize(index);
+            await File.WriteAllTextAsync(demandPath, json, cancellationToken);
+        }
+        finally
+        {
+            _indexLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Removes a satisfied manifest from indices/demand.json if present.
+    /// Returns true if a demand record was removed.
+    /// </summary>
+    public async Task<bool> RemoveDemandAsync(uint depotId, ulong manifestId, CancellationToken cancellationToken = default)
+    {
+        string demandPath = GetDemandIndexPath();
+        if (!File.Exists(demandPath))
+            return false;
+
+        await _indexLock.WaitAsync(cancellationToken);
+        try
+        {
+            string json = await File.ReadAllTextAsync(demandPath, cancellationToken);
+            var index = HubJsonSerializer.Deserialize<DemandIndex>(json);
+            if (index == null)
+                return false;
+
+            bool removed = index.Remove(depotId, manifestId);
+            if (removed)
+            {
+                await File.WriteAllTextAsync(demandPath, HubJsonSerializer.Serialize(index), cancellationToken);
+            }
+            return removed;
+        }
+        finally
+        {
+            _indexLock.Release();
+        }
     }
 
     #endregion

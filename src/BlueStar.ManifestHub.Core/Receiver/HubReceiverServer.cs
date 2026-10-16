@@ -417,6 +417,9 @@ public sealed class HubReceiverServer : IAsyncDisposable
                         var depotRecord = await _storageManager.GetDepotRecordAsync(submission.DepotId, cancellationToken);
                         var manifestIds = depotRecord?.ManifestIds ?? new[] { submission.ManifestId };
                         await _storageManager.ComputeAndSaveCoverageAsync(submission.AppId, submission.DepotId, manifestIds, cancellationToken);
+
+                        // Remove satisfied manifest from demand index
+                        await _storageManager.RemoveDemandAsync(submission.DepotId, submission.ManifestId, cancellationToken);
                     }
                 }
 
@@ -561,6 +564,18 @@ public sealed class HubReceiverServer : IAsyncDisposable
             if (!File.Exists(path))
             {
                 return Results.NotFound(new { error = "Catalog index depots.json not found." });
+            }
+
+            string json = await File.ReadAllTextAsync(path, cancellationToken);
+            return Results.Content(json, "application/json");
+        });
+
+        app.MapGet("/indices/demand.json", async (CancellationToken cancellationToken) =>
+        {
+            string path = _storageManager.GetDemandIndexPath();
+            if (!File.Exists(path))
+            {
+                return Results.NotFound(new { error = "Demand index demand.json not found." });
             }
 
             string json = await File.ReadAllTextAsync(path, cancellationToken);

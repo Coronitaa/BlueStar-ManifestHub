@@ -28,6 +28,7 @@ public sealed class DepotBoxOptions
     public int CircuitBreakerFailureThreshold { get; set; } = 5;
     public TimeSpan CircuitBreakerOpenDuration { get; set; } = TimeSpan.FromSeconds(30);
     public bool AllowBulkIngestion { get; set; } = false;
+    public bool RequireApiKey { get; set; } = false;
 }
 
 /// <summary>
@@ -95,6 +96,11 @@ public sealed class DepotBoxSourceAdapter : IManifestSourceAdapter, IDisposable
     {
         get
         {
+            if (_options.RequireApiKey && string.IsNullOrWhiteSpace(_options.ApiKey))
+            {
+                return false;
+            }
+
             lock (_cbLock)
             {
                 UpdateCircuitStateUnderLock();
@@ -109,6 +115,11 @@ public sealed class DepotBoxSourceAdapter : IManifestSourceAdapter, IDisposable
         ThrowIfDisposed();
 
         if (appId == 0)
+        {
+            return Array.Empty<DiscoveredManifest>();
+        }
+
+        if (_options.RequireApiKey && string.IsNullOrWhiteSpace(_options.ApiKey))
         {
             return Array.Empty<DiscoveredManifest>();
         }
@@ -141,6 +152,11 @@ public sealed class DepotBoxSourceAdapter : IManifestSourceAdapter, IDisposable
             return Array.Empty<DiscoveredManifest>();
         }
 
+        if (_options.RequireApiKey && string.IsNullOrWhiteSpace(_options.ApiKey))
+        {
+            return Array.Empty<DiscoveredManifest>();
+        }
+
         string url = $"{_options.BaseUrl.TrimEnd('/')}/api/depots/{depotId}/manifests";
         using var response = await ExecuteWithPolicyAsync(() => new HttpRequestMessage(HttpMethod.Get, url), cancellationToken);
 
@@ -163,6 +179,11 @@ public sealed class DepotBoxSourceAdapter : IManifestSourceAdapter, IDisposable
             return null;
         }
 
+        if (_options.RequireApiKey && string.IsNullOrWhiteSpace(_options.ApiKey))
+        {
+            return null;
+        }
+
         string url = $"{_options.BaseUrl.TrimEnd('/')}/api/depots/{depotId}/manifests/{manifestId}";
         using var response = await ExecuteWithPolicyAsync(() => new HttpRequestMessage(HttpMethod.Get, url), cancellationToken);
 
@@ -180,6 +201,11 @@ public sealed class DepotBoxSourceAdapter : IManifestSourceAdapter, IDisposable
         Func<HttpRequestMessage> requestFactory,
         CancellationToken cancellationToken)
     {
+        if (_options.RequireApiKey && string.IsNullOrWhiteSpace(_options.ApiKey))
+        {
+            return null;
+        }
+
         // 1. Check circuit breaker
         lock (_cbLock)
         {
@@ -208,7 +234,9 @@ public sealed class DepotBoxSourceAdapter : IManifestSourceAdapter, IDisposable
                 {
                     request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
                 }
-                var response = await _httpClient.SendAsync(request, cancellationToken);
+                using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                linkedCts.CancelAfter(_options.Timeout);
+                var response = await _httpClient.SendAsync(request, linkedCts.Token);
 
                 // Check for 429 Too Many Requests
                 if (response.StatusCode == (HttpStatusCode)429)
@@ -262,6 +290,17 @@ public sealed class DepotBoxSourceAdapter : IManifestSourceAdapter, IDisposable
                 }
 
                 return response;
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                RecordFailure();
+                if (attempts >= maxAttempts)
+                {
+                    return null;
+                }
+
+                var delay = TimeSpan.FromMilliseconds(500 * Math.Pow(2, attempts));
+                await Task.Delay(delay, cancellationToken);
             }
             catch (HttpRequestException)
             {

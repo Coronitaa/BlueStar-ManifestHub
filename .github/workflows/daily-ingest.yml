@@ -45,16 +45,22 @@ jobs:
             for id in "${ADDR[@]}"; do
               ARGS="$ARGS --app $id"
             done
-            dotnet run --project src/BlueStar.ManifestHub.Cli -- $ARGS
+            dotnet run --project src/BlueStar.ManifestHub.Cli /p:UseSharedCompilation=false -- $ARGS
           else
-            dotnet run --project src/BlueStar.ManifestHub.Cli -- --ingest-all
+            dotnet run --project src/BlueStar.ManifestHub.Cli /p:UseSharedCompilation=false -- --ingest-all
           fi
 
       - name: Commit and push batch publications
         run: |
           git config user.name "stardust-bot"
           git config user.email "bot@bluestar.hub"
-          git add manifests/ snapshots/ indices/ builds/ ledger/
+          mkdir -p manifests snapshots indices builds ledger
+          for target in manifests snapshots indices builds ledger; do
+            if [ -d "$target" ] && [ -n "$(ls -A "$target" 2>/dev/null)" ]; then
+              git add "$target"
+            fi
+          done
+          git add -A manifests/ snapshots/ indices/ builds/ ledger/ 2>/dev/null || true
           if git diff --staged --quiet; then
             echo "No changes detected to commit."
           else

@@ -1,6 +1,10 @@
+using BlueStar.ManifestHub.Core.Demand;
 using BlueStar.ManifestHub.Core.Ingestion;
 using BlueStar.ManifestHub.Core.Ingestion.Adapters;
+using BlueStar.ManifestHub.Core.Ledger;
+using BlueStar.ManifestHub.Core.Models;
 using BlueStar.ManifestHub.Core.Receiver;
+using BlueStar.ManifestHub.Core.Serialization;
 using BlueStar.ManifestHub.Core.Storage;
 using BlueStar.ManifestHub.Core.Validation;
 
@@ -14,7 +18,257 @@ public static class Program
 
         string repoRoot = Directory.GetCurrentDirectory();
         var storageManager = new ManifestStorageManager(new StorageOptions { BasePath = repoRoot });
+        storageManager.EnsureDirectoryStructure();
         var validator = new ManifestValidator();
+        var demandEngine = new DemandEngine(storageManager);
+
+        // Check for --verify-contribution mode
+        bool isVerifyContribution = false;
+        string? verifyManifestPath = null;
+        string? contributor = null;
+        uint verifyAppId = 0;
+        uint verifyDepotId = 0;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (args[i].Equals("--verify-contribution", StringComparison.OrdinalIgnoreCase))
+            {
+                isVerifyContribution = true;
+                if (i + 1 < args.Length && !args[i + 1].StartsWith("--"))
+                {
+                    verifyManifestPath = args[i + 1];
+                    i++;
+                }
+            }
+            else if (args[i].Equals("--contributor", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+            {
+                contributor = args[i + 1];
+                i++;
+            }
+            else if (args[i].Equals("--app", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length && uint.TryParse(args[i + 1], out uint aId))
+            {
+                verifyAppId = aId;
+            }
+            else if (args[i].Equals("--depot", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length && uint.TryParse(args[i + 1], out uint dId))
+            {
+                verifyDepotId = dId;
+                i++;
+            }
+        }
+
+        if (isVerifyContribution)
+        {
+            if (string.IsNullOrWhiteSpace(verifyManifestPath))
+            {
+                var errorReceipt = new
+                {
+                    isSuccess = false,
+                    status = "Corrupted",
+                    error = "Missing manifest file path for --verify-contribution."
+                };
+                Console.WriteLine(HubJsonSerializer.Serialize(errorReceipt));
+                return 1;
+            }
+
+            if (!File.Exists(verifyManifestPath))
+            {
+                var errorReceipt = new
+                {
+                    isSuccess = false,
+                    status = "Missing",
+                    error = $"Manifest file not found at '{verifyManifestPath}'."
+                };
+                Console.WriteLine(HubJsonSerializer.Serialize(errorReceipt));
+                return 1;
+            }
+
+            string contributorPseudonym = string.IsNullOrWhiteSpace(contributor) ? "anonymous_contributor" : contributor.Trim();
+            try
+            {
+                StardustLedgerManager.ValidateContributorPseudonym(contributorPseudonym);
+            }
+            catch (InvalidContributorIdentityException ex)
+            {
+                var errorReceipt = new
+                {
+                    isSuccess = false,
+                    status = "Restricted",
+                    error = ex.Message
+                };
+                Console.WriteLine(HubJsonSerializer.Serialize(errorReceipt));
+                return 1;
+            }
+
+            byte[] manifestBytes;
+            try
+            {
+                manifestBytes = await File.ReadAllBytesAsync(verifyManifestPath);
+            }
+            catch (Exception ex)
+            {
+                var errorReceipt = new
+                {
+                    isSuccess = false,
+                    status = "Inaccessible",
+                    error = $"Could not read manifest file: {ex.Message}"
+                };
+                Console.WriteLine(HubJsonSerializer.Serialize(errorReceipt));
+                return 1;
+            }
+
+            var valResult = validator.Validate(manifestBytes, expectedDepotId: verifyDepotId, expectedManifestId: 0);
+            if (!valResult.IsValid)
+            {
+                var errorReceipt = new
+                {
+                    isSuccess = false,
+                    status = valResult.Status.ToString(),
+                    error = valResult.ErrorMessage
+                };
+                Console.WriteLine(HubJsonSerializer.Serialize(errorReceipt));
+                return 1;
+            }
+
+            uint depotId = valResult.DepotId > 0 ? valResult.DepotId : verifyDepotId;
+            ulong manifestId = valResult.ManifestId;
+
+            if (depotId == 0)
+            {
+                var errorReceipt = new
+                {
+                    isSuccess = false,
+                    status = "Corrupted",
+                    error = "Could not determine DepotId from manifest protobuf payload or --depot argument."
+                };
+                Console.WriteLine(HubJsonSerializer.Serialize(errorReceipt));
+                return 1;
+            }
+
+            if (manifestId == 0)
+            {
+                var errorReceipt = new
+                {
+                    isSuccess = false,
+                    status = "Corrupted",
+                    error = "Could not determine ManifestId (GID) from manifest protobuf payload."
+                };
+                Console.WriteLine(HubJsonSerializer.Serialize(errorReceipt));
+                return 1;
+            }
+
+            string canonicalPath = storageManager.GetManifestPath(depotId, manifestId);
+            var pubResult = await storageManager.PublishManifestAsync(
+                manifestBytes,
+                depotId,
+                manifestId,
+                source: "contribution",
+                contributorPseudonym: contributorPseudonym);
+
+            if (!pubResult.IsSuccess)
+            {
+                var errorReceipt = new
+                {
+                    isSuccess = false,
+                    status = pubResult.Status.ToString(),
+                    error = pubResult.Message
+                };
+                Console.WriteLine(HubJsonSerializer.Serialize(errorReceipt));
+                return 1;
+            }
+
+            string fullSource = Path.GetFullPath(verifyManifestPath);
+            string fullCanonical = Path.GetFullPath(canonicalPath);
+            if (!string.Equals(fullSource, fullCanonical, StringComparison.OrdinalIgnoreCase) && File.Exists(fullSource))
+            {
+                try { File.Delete(fullSource); } catch { /* best effort */ }
+            }
+
+            int rewardPoints = await demandEngine.GetStardustRewardForManifestAsync(depotId, manifestId, fallbackReward: 100);
+            await demandEngine.RemoveDemandAsync(depotId, manifestId);
+
+            var ledgerManager = new StardustLedgerManager(new StorageOptions { BasePath = repoRoot });
+            int stardustCredited = 0;
+            bool isDuplicate = pubResult.IsDuplicate;
+            string? txId = null;
+
+            if (!isDuplicate)
+            {
+                try
+                {
+                    var ledgerEntry = await ledgerManager.AwardPointsForManifestAsync(
+                        contributorPseudonym: contributorPseudonym,
+                        depotId: depotId,
+                        manifestId: manifestId,
+                        status: ManifestStatus.AvailableAndValidated,
+                        points: rewardPoints,
+                        reason: $"Contribution verified via CLI for depot {depotId} manifest {manifestId}");
+
+                    stardustCredited = ledgerEntry.Points;
+                    txId = ledgerEntry.TransactionId;
+                }
+                catch (DuplicateArtifactRewardException)
+                {
+                    isDuplicate = true;
+                    stardustCredited = 0;
+                }
+            }
+
+            uint appId = verifyAppId;
+            if (appId == 0)
+            {
+                var appRec = await storageManager.GetAppRecordByDepotIdAsync(depotId);
+                if (appRec != null)
+                {
+                    appId = appRec.AppId;
+                }
+            }
+            if (appId > 0)
+            {
+                var depotRecord = await storageManager.GetDepotRecordAsync(depotId);
+                var manifestIds = depotRecord?.ManifestIds ?? new[] { manifestId };
+                await storageManager.ComputeAndSaveCoverageAsync(appId, depotId, manifestIds);
+            }
+
+            var receipt = new
+            {
+                isSuccess = true,
+                status = isDuplicate ? "Duplicate" : "Published",
+                receiptId = txId ?? Guid.NewGuid().ToString("N"),
+                appId = appId,
+                depotId = depotId,
+                manifestId = manifestId,
+                sha256 = valResult.Sha256,
+                stardustCredited = stardustCredited,
+                contributor = contributorPseudonym,
+                canonicalPath = canonicalPath,
+                isDuplicate = isDuplicate,
+                timestamp = DateTimeOffset.UtcNow
+            };
+            Console.WriteLine(HubJsonSerializer.Serialize(receipt));
+            return 0;
+        }
+
+        // Check for --generate-demand mode
+        bool isGenerateDemand = args.Any(a => a.Equals("--generate-demand", StringComparison.OrdinalIgnoreCase));
+        if (isGenerateDemand)
+        {
+            var demandAppIds = new List<uint>();
+            for (int i = 0; i < args.Length; i++)
+            {
+                if (args[i] == "--app" && i + 1 < args.Length && uint.TryParse(args[i + 1], out uint aId))
+                {
+                    demandAppIds.Add(aId);
+                    i++;
+                }
+            }
+
+            Console.WriteLine("[DEMAND] Calculating manifest demand across tracked applications...");
+            var demandIndex = await demandEngine.GenerateDemandAsync(demandAppIds.Count > 0 ? demandAppIds : null);
+
+            Console.WriteLine($"[DEMAND] Generated demand index with {demandIndex.TotalMissing} missing manifests across {demandIndex.Apps.Count} applications.");
+            Console.WriteLine($"[DEMAND] Index stored at {storageManager.GetDemandIndexPath()}");
+            return 0;
+        }
 
         var rateGovernor = new FileCoordinatedRateGovernor(new RateGovernorOptions
         {
@@ -23,12 +277,17 @@ public static class Program
         });
 
         string? apiKey = Environment.GetEnvironmentVariable("DEPOTBOX_API_KEY");
-        var adapters = new List<IManifestSourceAdapter>
+        var adapters = new List<IManifestSourceAdapter>();
+        if (!string.IsNullOrWhiteSpace(apiKey))
         {
-            new DepotBoxSourceAdapter(rateGovernor, new DepotBoxOptions { ApiKey = apiKey, AllowBulkIngestion = false }),
-            new ManifestHub2SourceAdapter(),
-            new K25SourceAdapter()
-        };
+            adapters.Add(new DepotBoxSourceAdapter(rateGovernor, new DepotBoxOptions { ApiKey = apiKey, AllowBulkIngestion = false, RequireApiKey = true }));
+        }
+        else
+        {
+            Console.WriteLine("[WARN] DEPOTBOX_API_KEY is not configured or empty. Cleanly skipping DepotBox source provider.");
+        }
+        adapters.Add(new ManifestHub2SourceAdapter(rateGovernor));
+        adapters.Add(new K25SourceAdapter(rateGovernor));
 
         var pipeline = new IngestionPipeline(adapters, storageManager, validator);
 
@@ -202,6 +461,16 @@ public static class Program
             Console.Error.WriteLine("[ERROR] Ingestion failed: all discovered manifests failed validation or acquisition.");
             return 1;
         }
+
+        // Invoke batch snapshot generation across all processed applications
+        Console.WriteLine("[SNAPSHOT] Generating batch snapshots for tracked applications...");
+        int batchSnapshotsCount = await storageManager.GenerateBatchSnapshotsAsync(appIdsToIngest);
+        Console.WriteLine($"[SNAPSHOT] Generated / synchronized snapshots for {batchSnapshotsCount} applications.");
+
+        // Automatically update demand index at the end of synchronization
+        Console.WriteLine("[DEMAND] Updating demand index (indices/demand.json)...");
+        var syncDemandIndex = await demandEngine.GenerateDemandAsync(appIdsToIngest);
+        Console.WriteLine($"[DEMAND] Demand index updated: {syncDemandIndex.TotalMissing} missing manifests cataloged across {syncDemandIndex.Apps.Count} applications.");
 
         Console.WriteLine("[SUCCESS] Ingestion completed successfully.");
         return 0;

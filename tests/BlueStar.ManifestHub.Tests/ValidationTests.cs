@@ -234,4 +234,18 @@ public class ValidationTests
         // Must complete promptly without hanging in infinite loop
         Assert.False(result.IsValid);
     }
+
+    [Fact]
+    public void HasSteamProtobufMagic_ValidatesLittleEndianAndBigEndian()
+    {
+        byte[] littleEndian = new byte[] { 0xD0, 0x17, 0xF6, 0x71 };
+        byte[] bigEndian = new byte[] { 0x71, 0xF6, 0x17, 0xD0 };
+        byte[] invalid = new byte[] { 0x00, 0x00, 0x00, 0x00 };
+        byte[] tooShort = new byte[] { 0xD0, 0x17 };
+
+        Assert.True(ManifestValidator.HasSteamProtobufMagic(littleEndian));
+        Assert.True(ManifestValidator.HasSteamProtobufMagic(bigEndian));
+        Assert.False(ManifestValidator.HasSteamProtobufMagic(invalid));
+        Assert.False(ManifestValidator.HasSteamProtobufMagic(tooShort));
+    }
 }
