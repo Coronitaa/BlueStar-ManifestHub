@@ -398,35 +398,20 @@ public sealed class HubReceiverServer : IAsyncDisposable
                         };
                         await _storageManager.UpdateAppRecordAsync(appRecord, cancellationToken);
 
-                        // Update builds/{AppId}.json
-                        var existingSnapshots = await _storageManager.GetBuildSnapshotsAsync(submission.AppId, cancellationToken);
-                        ulong buildId = existingSnapshots.Count > 0 ? existingSnapshots.Max(s => s.BuildId) + 1 : 1UL;
-                        
-                        // Authentic creation timestamp from manifest revision
-                        // Auditor Finding 4: Never fabricate dates from previous snapshots!
-                        DateTimeOffset? authenticTime = publishResult.Revision?.CreationTime;
-                        if (authenticTime == DateTimeOffset.MinValue)
+                        // Section 6 requirement:
+                        // "Los snapshots históricos deben representar builds reales con depots y ManifestGID asociados
+                        // según metadatos fiables. No crear builds sintéticos por cada contribución individual.
+                        // Distinguir fecha de publicación auténtica, fecha de ingestión y fecha desconocida.
+                        // No heredar fechas antiguas ni utilizar UtcNow como fecha de lanzamiento."
+                        // Do NOT synthesize fake 1-depot BuildSnapshots on each individual manifest contribution publish.
+                        // Update depot records and coverage index accurately instead.
+                        // Real build snapshots should only be created when authentic multi-depot build metadata is supplied.
+                        if (submission.AuthenticBuildSnapshot != null &&
+                            submission.AuthenticBuildSnapshot.DepotManifests != null &&
+                            submission.AuthenticBuildSnapshot.DepotManifests.Count > 1)
                         {
-                            authenticTime = null;
+                            await _storageManager.SaveBuildSnapshotAsync(submission.AuthenticBuildSnapshot, cancellationToken);
                         }
-
-                        // Do NOT fabricate complete builds from individual contributions
-                        var depotManifests = new Dictionary<uint, ulong>
-                        {
-                            [submission.DepotId] = submission.ManifestId
-                        };
-
-                        var snapshot = new BuildSnapshot
-                        {
-                            AppId = submission.AppId,
-                            BuildId = buildId,
-                            Timestamp = authenticTime ?? DateTimeOffset.UnixEpoch,
-                            CreationTime = authenticTime,
-                            Branch = "public",
-                            Description = $"Build snapshot for App {submission.AppId}",
-                            DepotManifests = depotManifests
-                        };
-                        await _storageManager.SaveBuildSnapshotAsync(snapshot, cancellationToken);
 
                         // Update indices/coverage.json
                         var depotRecord = await _storageManager.GetDepotRecordAsync(submission.DepotId, cancellationToken);
@@ -545,7 +530,7 @@ public sealed class HubReceiverServer : IAsyncDisposable
             return Results.Content(json, "application/json");
         });
 
-        // 6. Catalog index query endpoint
+        // 6. Catalog index query endpoints
         app.MapGet("/indices/apps.json", async (CancellationToken cancellationToken) =>
         {
             string path = _storageManager.GetAppIndexPath();
@@ -556,6 +541,150 @@ public sealed class HubReceiverServer : IAsyncDisposable
 
             string json = await File.ReadAllTextAsync(path, cancellationToken);
             return Results.Content(json, "application/json");
+        });
+
+        app.MapGet("/indices/coverage.json", async (CancellationToken cancellationToken) =>
+        {
+            string path = _storageManager.GetCoverageIndexPath();
+            if (!File.Exists(path))
+            {
+                return Results.NotFound(new { error = "Catalog index coverage.json not found." });
+            }
+
+            string json = await File.ReadAllTextAsync(path, cancellationToken);
+            return Results.Content(json, "application/json");
+        });
+
+        app.MapGet("/indices/depots.json", async (CancellationToken cancellationToken) =>
+        {
+            string path = _storageManager.GetDepotIndexPath();
+            if (!File.Exists(path))
+            {
+                return Results.NotFound(new { error = "Catalog index depots.json not found." });
+            }
+
+            string json = await File.ReadAllTextAsync(path, cancellationToken);
+            return Results.Content(json, "application/json");
+        });
+
+        // 7. Bulk / Targeted coverage query endpoint
+        app.MapPost("/api/v1/coverage/query", async (HttpContext context, CancellationToken cancellationToken) =>
+        {
+            CoverageQueryRequest? request = null;
+            try
+            {
+                if (context.Request.ContentLength is > 0 or null)
+                {
+                    request = await JsonSerializer.DeserializeAsync<CoverageQueryRequest>(
+                        context.Request.Body,
+                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true },
+                        cancellationToken);
+                }
+            }
+            catch (Exception ex)
+            {
+                return Results.BadRequest(new { error = $"Invalid JSON payload: {ex.Message}", isSuccess = false });
+            }
+
+            var specificPairs = request?.Manifests?.Select(m => (m.DepotId, m.ManifestId)).ToList();
+            var results = await _storageManager.QueryExistingManifestsAsync(
+                request?.AppIds,
+                request?.DepotIds,
+                specificPairs,
+                cancellationToken);
+
+            var pairsList = new List<CoverageManifestItem>();
+            var depotMap = new Dictionary<string, List<ulong>>();
+
+            foreach (var (dId, mId) in results)
+            {
+                pairsList.Add(new CoverageManifestItem { DepotId = dId, ManifestId = mId });
+                string dKey = dId.ToString();
+                if (!depotMap.TryGetValue(dKey, out var mList))
+                {
+                    mList = new List<ulong>();
+                    depotMap[dKey] = mList;
+                }
+                if (!mList.Contains(mId))
+                {
+                    mList.Add(mId);
+                }
+            }
+
+            return Results.Ok(new CoverageQueryResponse
+            {
+                IsSuccess = true,
+                ExistingManifests = pairsList,
+                DepotManifests = depotMap
+            });
+        });
+
+        // 8. Authentic multi-depot build snapshot registration endpoint
+        app.MapPost("/api/v1/builds/snapshot", async (HttpContext context, CancellationToken cancellationToken) =>
+        {
+            BuildSnapshot? snapshot;
+            try
+            {
+                snapshot = await JsonSerializer.DeserializeAsync<BuildSnapshot>(
+                    context.Request.Body,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true },
+                    cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                return Results.BadRequest(new { error = $"Invalid JSON payload: {ex.Message}", isSuccess = false });
+            }
+
+            if (snapshot == null || snapshot.AppId == 0 || snapshot.BuildId == 0)
+            {
+                return Results.BadRequest(new { error = "Valid AppId and BuildId are required.", isSuccess = false });
+            }
+
+            if (snapshot.DepotManifests == null || snapshot.DepotManifests.Count <= 1)
+            {
+                return Results.BadRequest(new
+                {
+                    error = "Real build snapshots must represent authentic builds with multiple associated depots and ManifestGIDs. Individual depot contributions must not create synthetic single-depot build snapshots.",
+                    isSuccess = false
+                });
+            }
+
+            using (await AcquireLockAsync($"app:{snapshot.AppId}", cancellationToken))
+            {
+                DateTimeOffset snapshotTimestamp = snapshot.CreationTime ?? (snapshot.Timestamp != DateTimeOffset.UtcNow ? snapshot.Timestamp : DateTimeOffset.UnixEpoch);
+
+                var normalizedSnapshot = new BuildSnapshot
+                {
+                    AppId = snapshot.AppId,
+                    BuildId = snapshot.BuildId,
+                    Timestamp = snapshotTimestamp,
+                    CreationTime = snapshot.CreationTime,
+                    Branch = string.IsNullOrWhiteSpace(snapshot.Branch) ? "public" : snapshot.Branch,
+                    Description = snapshot.Description,
+                    DepotManifests = snapshot.DepotManifests
+                };
+
+                await _storageManager.SaveBuildSnapshotAsync(normalizedSnapshot, cancellationToken);
+
+                var existingApp = await _storageManager.GetAppRecordAsync(snapshot.AppId, cancellationToken);
+                var depotSet = new HashSet<uint>(existingApp?.DepotIds ?? Array.Empty<uint>());
+                foreach (var d in snapshot.DepotManifests.Keys)
+                {
+                    depotSet.Add(d);
+                }
+
+                var appRecord = new AppRecord
+                {
+                    AppId = snapshot.AppId,
+                    Name = existingApp?.Name ?? $"App {snapshot.AppId}",
+                    DepotIds = depotSet.OrderBy(x => x).ToList(),
+                    LastUpdated = DateTimeOffset.UtcNow,
+                    Metadata = existingApp?.Metadata ?? new Dictionary<string, string>()
+                };
+                await _storageManager.UpdateAppRecordAsync(appRecord, cancellationToken);
+
+                return Results.Ok(new { isSuccess = true, buildId = snapshot.BuildId, appId = snapshot.AppId });
+            }
         });
     }
 

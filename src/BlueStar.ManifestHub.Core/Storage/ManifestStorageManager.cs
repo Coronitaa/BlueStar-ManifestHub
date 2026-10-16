@@ -576,6 +576,194 @@ public sealed class ManifestStorageManager
     }
 
     /// <summary>
+    /// Gets all indexed depot records.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<string, DepotRecord>> GetAllDepotRecordsAsync(CancellationToken cancellationToken = default)
+    {
+        string depotIndexPath = GetDepotIndexPath();
+        if (!File.Exists(depotIndexPath))
+            return new Dictionary<string, DepotRecord>();
+
+        await _indexLock.WaitAsync(cancellationToken);
+        try
+        {
+            string json = await File.ReadAllTextAsync(depotIndexPath, cancellationToken);
+            return HubJsonSerializer.Deserialize<Dictionary<string, DepotRecord>>(json) ?? (IReadOnlyDictionary<string, DepotRecord>)new Dictionary<string, DepotRecord>();
+        }
+        finally
+        {
+            _indexLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Queries existing manifests matching the provided app IDs, depot IDs, or specific (depot, manifest) pairs.
+    /// Returns a list of (DepotId, ManifestId) pairs that are physically stored in the repository.
+    /// </summary>
+    public async Task<IReadOnlyList<(uint DepotId, ulong ManifestId)>> QueryExistingManifestsAsync(
+        IEnumerable<uint>? appIds = null,
+        IEnumerable<uint>? depotIds = null,
+        IEnumerable<(uint DepotId, ulong ManifestId)>? specificPairs = null,
+        CancellationToken cancellationToken = default)
+    {
+        var existing = new List<(uint DepotId, ulong ManifestId)>();
+        var seen = new HashSet<(uint DepotId, ulong ManifestId)>();
+
+        // 1. Check specific pairs directly if requested
+        if (specificPairs != null)
+        {
+            foreach (var (dId, mId) in specificPairs)
+            {
+                if (dId > 0 && mId > 0 && ManifestExists(dId, mId))
+                {
+                    if (seen.Add((dId, mId)))
+                    {
+                        existing.Add((dId, mId));
+                    }
+                }
+            }
+        }
+
+        // 2. Resolve target depot IDs from app IDs and depot IDs
+        var targetDepots = new HashSet<uint>();
+        if (depotIds != null)
+        {
+            foreach (var d in depotIds)
+            {
+                if (d > 0) targetDepots.Add(d);
+            }
+        }
+
+        if (appIds != null)
+        {
+            foreach (var appId in appIds)
+            {
+                if (appId == 0) continue;
+                var appRecord = await GetAppRecordAsync(appId, cancellationToken);
+                if (appRecord?.DepotIds != null)
+                {
+                    foreach (var d in appRecord.DepotIds)
+                    {
+                        if (d > 0) targetDepots.Add(d);
+                    }
+                }
+
+                // Also check coverage records for this app
+                var covRecords = await GetCoverageRecordsForAppAsync(appId, cancellationToken);
+                foreach (var cov in covRecords)
+                {
+                    if (cov.DepotId > 0) targetDepots.Add(cov.DepotId);
+                }
+
+                // Also check any build snapshots for this app
+                var snapshots = await GetBuildSnapshotsAsync(appId, cancellationToken);
+                foreach (var snap in snapshots)
+                {
+                    if (snap.DepotManifests != null)
+                    {
+                        foreach (var (dId, mId) in snap.DepotManifests)
+                        {
+                            if (dId > 0 && mId > 0 && ManifestExists(dId, mId))
+                            {
+                                if (seen.Add((dId, mId)))
+                                {
+                                    existing.Add((dId, mId));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. If target depots specified, query their manifests
+        if (targetDepots.Count > 0)
+        {
+            foreach (var dId in targetDepots)
+            {
+                var depotRecord = await GetDepotRecordAsync(dId, cancellationToken);
+                if (depotRecord?.ManifestIds != null)
+                {
+                    foreach (var mId in depotRecord.ManifestIds)
+                    {
+                        if (mId > 0 && ManifestExists(dId, mId))
+                        {
+                            if (seen.Add((dId, mId)))
+                            {
+                                existing.Add((dId, mId));
+                            }
+                        }
+                    }
+                }
+
+                string depotDir = GetManifestDirectory(dId);
+                if (Directory.Exists(depotDir))
+                {
+                    var files = Directory.GetFiles(depotDir, "*.manifest");
+                    foreach (var f in files)
+                    {
+                        string fname = Path.GetFileNameWithoutExtension(f);
+                        if (ulong.TryParse(fname, out ulong mId) && mId > 0)
+                        {
+                            if (seen.Add((dId, mId)))
+                            {
+                                existing.Add((dId, mId));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        else if (appIds == null && depotIds == null && specificPairs == null)
+        {
+            // Empty query: discover all existing manifests across all depots
+            var allDepots = await GetAllDepotRecordsAsync(cancellationToken);
+            foreach (var (_, depotRecord) in allDepots)
+            {
+                if (depotRecord.ManifestIds != null)
+                {
+                    foreach (var mId in depotRecord.ManifestIds)
+                    {
+                        if (mId > 0 && ManifestExists(depotRecord.DepotId, mId))
+                        {
+                            if (seen.Add((depotRecord.DepotId, mId)))
+                            {
+                                existing.Add((depotRecord.DepotId, mId));
+                            }
+                        }
+                    }
+                }
+            }
+
+            string manifestsRoot = Path.Combine(_options.BasePath, _options.ManifestsDirectoryName);
+            if (Directory.Exists(manifestsRoot))
+            {
+                foreach (var dir in Directory.GetDirectories(manifestsRoot))
+                {
+                    string dirName = Path.GetFileName(dir);
+                    if (uint.TryParse(dirName, out uint dId) && dId > 0)
+                    {
+                        var files = Directory.GetFiles(dir, "*.manifest");
+                        foreach (var f in files)
+                        {
+                            string fname = Path.GetFileNameWithoutExtension(f);
+                            if (ulong.TryParse(fname, out ulong mId) && mId > 0)
+                            {
+                                if (seen.Add((dId, mId)))
+                                {
+                                    existing.Add((dId, mId));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return existing.AsReadOnly();
+    }
+
+    /// <summary>
     /// Updates or registers an application record in indices/apps.json, merging depot IDs and updating LastUpdated.
     /// </summary>
     public async Task UpdateAppRecordAsync(AppRecord app, CancellationToken cancellationToken = default)

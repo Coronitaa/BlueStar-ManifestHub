@@ -145,16 +145,13 @@ public sealed class RemoteReceiverTests : IAsyncLifetime
         int balance = await _ledgerManager.GetContributorBalanceAsync("anon_contributor_alpha");
         Assert.Equal(100, balance);
 
-        // Verify builds/{AppId}.json created
+        // Section 6 requirement: Do NOT synthesize fake 1-depot BuildSnapshots on individual contributions
         string buildPath = _storageManager.GetBuildSnapshotPath(appId);
-        Assert.True(File.Exists(buildPath));
+        Assert.False(File.Exists(buildPath));
         var snapshots = await _storageManager.GetBuildSnapshotsAsync(appId);
-        Assert.Single(snapshots);
-        Assert.Equal(appId, snapshots[0].AppId);
-        Assert.Equal(creationTime.ToUnixTimeSeconds(), snapshots[0].Timestamp.ToUnixTimeSeconds());
-        Assert.Equal(manifestId, snapshots[0].DepotManifests[depotId]);
+        Assert.Empty(snapshots);
 
-        // Verify indices/apps.json and indices/depots.json
+        // Verify indices/apps.json, indices/depots.json, and indices/coverage.json
         var appRecord = await _storageManager.GetAppRecordAsync(appId);
         Assert.NotNull(appRecord);
         Assert.Contains(depotId, appRecord.DepotIds);
@@ -162,6 +159,10 @@ public sealed class RemoteReceiverTests : IAsyncLifetime
         var depotRecord = await _storageManager.GetDepotRecordAsync(depotId);
         Assert.NotNull(depotRecord);
         Assert.Contains(manifestId, depotRecord.ManifestIds);
+
+        var coverageRecord = await _storageManager.GetCoverageRecordAsync(appId, depotId);
+        Assert.NotNull(coverageRecord);
+        Assert.Equal(1, coverageRecord.AvailableRevisions);
     }
 
     [Fact]
@@ -454,20 +455,25 @@ public sealed class RemoteReceiverTests : IAsyncLifetime
     public async Task GetBuildSnapshot_ReturnsSnapshotJson_WhenExists()
     {
         uint appId = 730;
-        uint depotId = 731;
-        ulong manifestId = 777666555UL;
-        byte[] bytes = TestManifestHelper.CreateValidManifest(depotId, manifestId);
+        var authenticTime = new DateTimeOffset(2025, 6, 15, 12, 0, 0, TimeSpan.Zero);
 
-        var sub = new ContributionSubmission
+        var buildSnapshot = new BuildSnapshot
         {
-            AnonymousContributorId = "anon_build_test",
             AppId = appId,
-            DepotId = depotId,
-            ManifestId = manifestId,
-            PayloadBase64 = Convert.ToBase64String(bytes)
+            BuildId = 12345,
+            CreationTime = authenticTime,
+            Timestamp = authenticTime,
+            Branch = "public",
+            Description = "Authentic release build",
+            DepotManifests = new Dictionary<uint, ulong>
+            {
+                [731] = 1111111UL,
+                [732] = 2222222UL
+            }
         };
 
-        await _client.PostAsJsonAsync("/api/v1/contributions/publish", sub);
+        var postResp = await _client.PostAsJsonAsync("/api/v1/builds/snapshot", buildSnapshot);
+        Assert.Equal(HttpStatusCode.OK, postResp.StatusCode);
 
         // Query /builds/{appId}.json
         var response = await _client.GetAsync($"/builds/{appId}.json");
@@ -479,6 +485,8 @@ public sealed class RemoteReceiverTests : IAsyncLifetime
         Assert.NotNull(snapshots);
         Assert.Single(snapshots);
         Assert.Equal(appId, snapshots[0].AppId);
+        Assert.Equal((ulong)12345, snapshots[0].BuildId);
+        Assert.Equal(2, snapshots[0].DepotManifests.Count);
     }
 
     [Fact]
@@ -861,24 +869,195 @@ public sealed class RemoteReceiverTests : IAsyncLifetime
         var resp2 = await _client.PostAsJsonAsync("/api/v1/contributions/publish", sub2);
         Assert.Equal(HttpStatusCode.OK, resp2.StatusCode);
 
-        // 3. Inspect build snapshots for App 730
+        // Section 6 requirement: Individual manifest contributions must NOT create synthetic 1-depot build snapshots
+        var individualSnapshots = await _storageManager.GetBuildSnapshotsAsync(appId);
+        Assert.Empty(individualSnapshots);
+
+        // 3. Register real multi-depot build snapshot with known authentic date
+        var build1 = new BuildSnapshot
+        {
+            AppId = appId,
+            BuildId = 1,
+            CreationTime = existingTimestamp,
+            Timestamp = existingTimestamp,
+            Branch = "public",
+            DepotManifests = new Dictionary<uint, ulong>
+            {
+                [731] = 8000001UL,
+                [732] = 1111111UL
+            }
+        };
+        var b1Resp = await _client.PostAsJsonAsync("/api/v1/builds/snapshot", build1);
+        Assert.Equal(HttpStatusCode.OK, b1Resp.StatusCode);
+
+        // 4. Register real multi-depot build snapshot with UNKNOWN date (CreationTime = null)
+        var build2 = new BuildSnapshot
+        {
+            AppId = appId,
+            BuildId = 2,
+            CreationTime = null,
+            Timestamp = DateTimeOffset.UnixEpoch,
+            Branch = "public",
+            DepotManifests = new Dictionary<uint, ulong>
+            {
+                [731] = 8000001UL,
+                [732] = 8000002UL
+            }
+        };
+        var b2Resp = await _client.PostAsJsonAsync("/api/v1/builds/snapshot", build2);
+        Assert.Equal(HttpStatusCode.OK, b2Resp.StatusCode);
+
+        // 5. Inspect build snapshots for App 730
         var snapshots = await _storageManager.GetBuildSnapshotsAsync(appId);
         Assert.Equal(2, snapshots.Count);
 
-        // Find snapshot for manifest2 (BuildId 2)
         var secondSnapshot = snapshots.FirstOrDefault(s => s.BuildId == 2);
         Assert.NotNull(secondSnapshot);
 
-        // Auditor Finding 4 verification:
+        // Section 6 verification:
         // Assert CreationTime is strictly null (not fabricated)
         Assert.Null(secondSnapshot.CreationTime);
 
-        // Assert Timestamp was NOT copied from snapshot 1
+        // Assert Timestamp was NOT copied from snapshot 1, nor set to UtcNow
         Assert.NotEqual(existingTimestamp, secondSnapshot.Timestamp);
         Assert.Equal(DateTimeOffset.UnixEpoch, secondSnapshot.Timestamp);
+        Assert.Equal("Unknown date", secondSnapshot.DisplayDate);
+        Assert.Equal("Fecha desconocida", secondSnapshot.DisplayDateEs);
+    }
 
-        // Assert it did not fabricate a complete build by copying depot 731
-        Assert.False(secondSnapshot.DepotManifests.ContainsKey(731));
-        Assert.True(secondSnapshot.DepotManifests.ContainsKey(732));
+    [Fact]
+    public async Task Indices_CoverageAndDepotsEndpoints_ReturnAccurateJson()
+    {
+        uint appId = 440;
+        uint depotId = 441;
+        ulong manifestId = 44001UL;
+        byte[] bytes = TestManifestHelper.CreateValidManifest(depotId, manifestId);
+
+        var sub = new ContributionSubmission
+        {
+            AnonymousContributorId = "anon_indices_test",
+            AppId = appId,
+            DepotId = depotId,
+            ManifestId = manifestId,
+            PayloadBase64 = Convert.ToBase64String(bytes)
+        };
+
+        var pubResp = await _client.PostAsJsonAsync("/api/v1/contributions/publish", sub);
+        Assert.Equal(HttpStatusCode.OK, pubResp.StatusCode);
+
+        // 1. GET /indices/depots.json
+        var depotsResp = await _client.GetAsync("/indices/depots.json");
+        Assert.Equal(HttpStatusCode.OK, depotsResp.StatusCode);
+        Assert.Equal("application/json", depotsResp.Content.Headers.ContentType?.MediaType);
+        string depotsJson = await depotsResp.Content.ReadAsStringAsync();
+        Assert.Contains(depotId.ToString(), depotsJson);
+        Assert.Contains(manifestId.ToString(), depotsJson);
+
+        // 2. GET /indices/coverage.json
+        var covResp = await _client.GetAsync("/indices/coverage.json");
+        Assert.Equal(HttpStatusCode.OK, covResp.StatusCode);
+        Assert.Equal("application/json", covResp.Content.Headers.ContentType?.MediaType);
+        string covJson = await covResp.Content.ReadAsStringAsync();
+        Assert.Contains($"{appId}:{depotId}", covJson);
+    }
+
+    [Fact]
+    public async Task CoverageQuery_ReturnsExistingDepotManifestPairs()
+    {
+        uint appId = 730;
+        uint depotId = 731;
+        ulong manifest1 = 9001UL;
+        ulong manifest2 = 9002UL;
+
+        // Publish manifest1
+        await _client.PostAsJsonAsync("/api/v1/contributions/publish", new ContributionSubmission
+        {
+            AnonymousContributorId = "anon_cov_query_user",
+            AppId = appId,
+            DepotId = depotId,
+            ManifestId = manifest1,
+            PayloadBase64 = Convert.ToBase64String(TestManifestHelper.CreateValidManifest(depotId, manifest1))
+        });
+
+        // Query by appId
+        var queryByApp = new CoverageQueryRequest
+        {
+            AppIds = new List<uint> { appId }
+        };
+        var respApp = await _client.PostAsJsonAsync("/api/v1/coverage/query", queryByApp);
+        Assert.Equal(HttpStatusCode.OK, respApp.StatusCode);
+        var resApp = await respApp.Content.ReadFromJsonAsync<CoverageQueryResponse>();
+        Assert.NotNull(resApp);
+        Assert.True(resApp.IsSuccess);
+        Assert.Contains(resApp.ExistingManifests, m => m.DepotId == depotId && m.ManifestId == manifest1);
+        Assert.DoesNotContain(resApp.ExistingManifests, m => m.DepotId == depotId && m.ManifestId == manifest2);
+
+        // Query by depotId
+        var queryByDepot = new CoverageQueryRequest
+        {
+            DepotIds = new List<uint> { depotId }
+        };
+        var respDepot = await _client.PostAsJsonAsync("/api/v1/coverage/query", queryByDepot);
+        Assert.Equal(HttpStatusCode.OK, respDepot.StatusCode);
+        var resDepot = await respDepot.Content.ReadFromJsonAsync<CoverageQueryResponse>();
+        Assert.NotNull(resDepot);
+        Assert.Contains(resDepot.ExistingManifests, m => m.DepotId == depotId && m.ManifestId == manifest1);
+
+        // Query specific pairs (manifest1 exists, manifest2 does not)
+        var queryPairs = new CoverageQueryRequest
+        {
+            Manifests = new List<CoverageManifestItem>
+            {
+                new() { DepotId = depotId, ManifestId = manifest1 },
+                new() { DepotId = depotId, ManifestId = manifest2 }
+            }
+        };
+        var respPairs = await _client.PostAsJsonAsync("/api/v1/coverage/query", queryPairs);
+        Assert.Equal(HttpStatusCode.OK, respPairs.StatusCode);
+        var resPairs = await respPairs.Content.ReadFromJsonAsync<CoverageQueryResponse>();
+        Assert.NotNull(resPairs);
+        Assert.Single(resPairs.ExistingManifests);
+        Assert.Equal(manifest1, resPairs.ExistingManifests[0].ManifestId);
+    }
+
+    [Fact]
+    public async Task PostBuildSnapshot_RejectsSyntheticSingleDepot_AcceptsMultiDepot()
+    {
+        // 1. Single depot build snapshot must be rejected to prevent synthetic 1-depot builds
+        var singleDepotSnapshot = new BuildSnapshot
+        {
+            AppId = 730,
+            BuildId = 991,
+            Branch = "public",
+            DepotManifests = new Dictionary<uint, ulong>
+            {
+                [731] = 55555UL
+            }
+        };
+
+        var rejectResp = await _client.PostAsJsonAsync("/api/v1/builds/snapshot", singleDepotSnapshot);
+        Assert.Equal(HttpStatusCode.BadRequest, rejectResp.StatusCode);
+        string rejectBody = await rejectResp.Content.ReadAsStringAsync();
+        Assert.Contains("synthetic", rejectBody, StringComparison.OrdinalIgnoreCase);
+
+        // 2. Authentic multi-depot build snapshot must be accepted
+        var multiDepotSnapshot = new BuildSnapshot
+        {
+            AppId = 730,
+            BuildId = 992,
+            Branch = "public",
+            CreationTime = new DateTimeOffset(2025, 1, 1, 0, 0, 0, TimeSpan.Zero),
+            DepotManifests = new Dictionary<uint, ulong>
+            {
+                [731] = 55555UL,
+                [732] = 66666UL
+            }
+        };
+
+        var acceptResp = await _client.PostAsJsonAsync("/api/v1/builds/snapshot", multiDepotSnapshot);
+        Assert.Equal(HttpStatusCode.OK, acceptResp.StatusCode);
+
+        var retrieved = await _storageManager.GetBuildSnapshotsAsync(730);
+        Assert.Contains(retrieved, s => s.BuildId == 992 && s.DepotManifests.Count == 2);
     }
 }

@@ -17,7 +17,7 @@ public sealed class BuildSnapshot
     public ulong BuildId { get; init; }
 
     [JsonPropertyName("timestamp")]
-    public DateTimeOffset Timestamp { get; init; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset Timestamp { get; init; } = DateTimeOffset.UnixEpoch;
 
     /// <summary>
     /// Authentic manifest/build creation timestamp when known; strictly null if absent.

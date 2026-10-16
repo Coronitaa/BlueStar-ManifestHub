@@ -32,6 +32,57 @@ public sealed class ContributionSubmission
 
     [JsonPropertyName("payloadBase64")]
     public string PayloadBase64 { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional authentic multi-depot build snapshot associated with this contribution.
+    /// </summary>
+    [JsonPropertyName("authenticBuildSnapshot")]
+    public BlueStar.ManifestHub.Core.Models.BuildSnapshot? AuthenticBuildSnapshot { get; set; }
+}
+
+/// <summary>
+/// Model for querying Hub manifest coverage.
+/// </summary>
+public sealed class CoverageQueryRequest
+{
+    [JsonPropertyName("appIds")]
+    public List<uint>? AppIds { get; set; }
+
+    [JsonPropertyName("depotIds")]
+    public List<uint>? DepotIds { get; set; }
+
+    [JsonPropertyName("manifests")]
+    public List<CoverageManifestItem>? Manifests { get; set; }
+}
+
+/// <summary>
+/// Pair representing a depot and manifest for coverage queries.
+/// </summary>
+public sealed class CoverageManifestItem
+{
+    [JsonPropertyName("depotId")]
+    public uint DepotId { get; set; }
+
+    [JsonPropertyName("manifestId")]
+    public ulong ManifestId { get; set; }
+}
+
+/// <summary>
+/// Response model for coverage queries.
+/// </summary>
+public sealed class CoverageQueryResponse
+{
+    [JsonPropertyName("isSuccess")]
+    public bool IsSuccess { get; set; } = true;
+
+    [JsonPropertyName("existingManifests")]
+    public List<CoverageManifestItem> ExistingManifests { get; set; } = new();
+
+    [JsonPropertyName("depotManifests")]
+    public Dictionary<string, List<ulong>> DepotManifests { get; set; } = new();
+
+    [JsonPropertyName("totalFound")]
+    public int TotalFound => ExistingManifests.Count;
 }
 
 /// <summary>

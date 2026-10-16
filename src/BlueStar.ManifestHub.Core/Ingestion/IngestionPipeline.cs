@@ -440,7 +440,7 @@ public sealed class IngestionPipeline
                 }
             }
 
-            DateTimeOffset snapshotTimestamp = authenticTimestamp ?? DateTimeOffset.UtcNow;
+            DateTimeOffset snapshotTimestamp = authenticTimestamp ?? DateTimeOffset.UnixEpoch;
 
             // 5. Save BuildSnapshot
             var snapshot = new BuildSnapshot
@@ -448,6 +448,7 @@ public sealed class IngestionPipeline
                 AppId = appId,
                 BuildId = buildId,
                 Timestamp = snapshotTimestamp,
+                CreationTime = authenticTimestamp,
                 Branch = branch,
                 Description = $"Build snapshot {buildId} for App {appId} ({branch})",
                 DepotManifests = depotManifests
