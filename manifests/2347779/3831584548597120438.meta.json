@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "v1",
+  "depotId": 2347779,
+  "manifestId": 3831584548597120438,
+  "creationTime": "2025-07-14T23:15:54+00:00",
+  "sizeOriginal": 876695414,
+  "sizeCompressed": 227270240,
+  "sha256": "ddf096c5744171675cafb8911796cecff5267a4c42e56000c343bbcfc42ce0fb",
+  "sha1": "18156400eb2c9adab5273a1864df02eb432cf26b",
+  "status": "availableAndValidated",
+  "ingestedAt": "2026-10-17T07:23:26.7975659+00:00",
+  "source": "K25",
+  "contributorPseudonym": "bluestar-pipeline"
+}
