@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>BlueStar.ManifestHarvester.Cli</RootNamespace>
+    <AssemblyName>BlueStar.ManifestHarvester.Cli</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BlueStar.ManifestHub.Core\BlueStar.ManifestHub.Core.csproj" />
+  </ItemGroup>
+
+</Project>

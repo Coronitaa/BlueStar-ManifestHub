@@ -13,6 +13,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BlueStar.ManifestHub.Tests"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BlueStar.ManifestHub.Cli", "src\BlueStar.ManifestHub.Cli\BlueStar.ManifestHub.Cli.csproj", "{1588F993-842F-4971-87AE-B6A38768DFA0}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BlueStar.ManifestHarvester.Cli", "src\BlueStar.ManifestHarvester.Cli\BlueStar.ManifestHarvester.Cli.csproj", "{DC9D63FD-1068-41EF-8B0F-B4C6EADCF3C7}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -34,10 +36,15 @@ Global
 		{1588F993-842F-4971-87AE-B6A38768DFA0}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{1588F993-842F-4971-87AE-B6A38768DFA0}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{1588F993-842F-4971-87AE-B6A38768DFA0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DC9D63FD-1068-41EF-8B0F-B4C6EADCF3C7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DC9D63FD-1068-41EF-8B0F-B4C6EADCF3C7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DC9D63FD-1068-41EF-8B0F-B4C6EADCF3C7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DC9D63FD-1068-41EF-8B0F-B4C6EADCF3C7}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{E396E311-E2A2-428A-A093-7FCFEB3B5E57} = {2C7A55F6-2190-4BC6-8BE6-F82F97654964}
 		{03DC14FE-DB66-485F-896F-44FE47FA4994} = {82E870D6-D8DC-44BA-A4EC-F9F5BF4E9A12}
 		{1588F993-842F-4971-87AE-B6A38768DFA0} = {2C7A55F6-2190-4BC6-8BE6-F82F97654964}
+		{DC9D63FD-1068-41EF-8B0F-B4C6EADCF3C7} = {2C7A55F6-2190-4BC6-8BE6-F82F97654964}
 	EndGlobalSection
 EndGlobal
