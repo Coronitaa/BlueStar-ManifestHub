@@ -10,6 +10,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="SteamKit2" Version="3.2.0" />
+    <PackageReference Include="QRCoder" Version="1.6.0" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\BlueStar.ManifestHub.Core\BlueStar.ManifestHub.Core.csproj" />
   </ItemGroup>
 

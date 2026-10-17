@@ -45,6 +45,7 @@ public static class Program
             "import-cache" => HandleImportCacheCommand(args, steamPath, repoRoot),
             "list-owned" => HandleListOwnedCommand(args, steamPath, account),
             "status" => HandleStatusCommand(steamPath, isRunning, pid, account, repoRoot),
+            "login" or "login-qr" or "qr" => await HandleLoginQrCommandAsync(repoRoot),
             "help" or "--help" or "-h" => ShowHelp(),
             _ => ShowUnknownCommand(command)
         };
@@ -99,7 +100,8 @@ public static class Program
             Console.WriteLine("  [2] Harvest missing manifests from demand.json (matching owned games)");
             Console.WriteLine("  [3] Import already-downloaded manifests from Steam depotcache");
             Console.WriteLine("  [4] List owned AppIDs in active Steam account (local cache)");
-            Console.WriteLine("  [5] System Status & Diagnostics");
+            Console.WriteLine("  [5] Iniciar sesión con Código QR (Steam Mobile App)");
+            Console.WriteLine("  [6] System Status & Diagnostics");
             Console.WriteLine("  [0] Exit");
             Console.Write("\nChoice > ");
 
@@ -121,6 +123,9 @@ public static class Program
                     HandleListOwnedCommand(["list-owned"], steamPath, account);
                     break;
                 case "5":
+                    await HandleLoginQrCommandAsync(repoRoot);
+                    break;
+                case "6":
                     HandleStatusCommand(steamPath, isRunning, pid, account, repoRoot);
                     break;
                 case "0" or "exit" or "q":
@@ -550,9 +555,25 @@ public static class Program
         Console.WriteLine($"  - Steam depotcache:   {depotCachePath} ({depotCacheCount} manifests cached)");
         Console.WriteLine($"  - Hub manifests dir:  {manifestsPath} ({repoManifestCount} manifests in Hub)");
         Console.WriteLine($"  - Hub demand.json:    {demandPath} ({missingDemandCount} missing manifests pending)");
+
+        var savedToken = SteamQrAuthenticator.LoadSavedToken(repoRoot);
+        if (savedToken != null)
+        {
+            Console.WriteLine($"  - Steam Auth Token:   ACTIVO para '{savedToken.AccountName}' (ID: {savedToken.SteamId})");
+        }
+        else
+        {
+            Console.WriteLine($"  - Steam Auth Token:   Ninguno (Usa `.\\harvest.bat login` para iniciar sesión con QR)");
+        }
         Console.WriteLine();
 
         return 0;
+    }
+
+    private static async Task<int> HandleLoginQrCommandAsync(string repoRoot)
+    {
+        var token = await SteamQrAuthenticator.AuthenticateViaQrAsync(repoRoot);
+        return token != null ? 0 : 1;
     }
 
     private static void TryUpdateDemandAndLedger(
@@ -615,6 +636,7 @@ Commands:
   demand              Scan indices/demand.json and download missing manifests for owned games
   import-cache        Import manifests already cached in Steam's depotcache folder
   list-owned          List all AppIDs owned by the active Steam account (zero HTTP requests)
+  login, login-qr, qr Inicia sesión oficial con la app móvil de Steam mediante Código QR
   status              Display Steam process, active user, and Hub repository status
   help                Show this help message
 
@@ -623,7 +645,7 @@ Options for 'download':
   --depot <DepotId>       Steam Depot ID
   --manifest <ManifestId> Steam Manifest ID
   --output <dir>          Output folder (default: manifests/)
-  --timeout <seconds>     Timeout waiting for Steam download (default: 30)
+  --timeout <seconds>     Timeout waiting for Steam download (default: 60)
 
 Options for 'demand':
   --demand-file <file>    Path to demand.json (default: indices/demand.json)
