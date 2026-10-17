@@ -75,14 +75,41 @@ public static class SteamManifestHarvester
         watcher.Changed += onCreated;
 
         // 3. Trigger download_manifest in Steam client
+        var manifestCommand = $"download_manifest {appId} {depotId} {manifestId}";
         var commandArgs = $"-console +download_manifest {appId} {depotId} {manifestId}";
         var steamExe = Path.Combine(steamPath, "steam.exe");
 
+        // Open Steam console tab directly
+        try
+        {
+            Process.Start(new ProcessStartInfo("steam://open/console") { UseShellExecute = true });
+        }
+        catch { }
+
+        // Copy command to clipboard for instant pasting
+        bool copied = TryCopyToClipboard(manifestCommand);
+
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine("\n=========================================================================");
+        Console.WriteLine(" [STEAM CONSOLE ACTIVADO]");
+        if (copied)
+        {
+            Console.WriteLine(" El comando se ha COPIADO automáticamente a tu portapapeles (Ctrl+V):");
+        }
+        else
+        {
+            Console.WriteLine(" Comando para descargar el manifest:");
+        }
         Console.ForegroundColor = ConsoleColor.Cyan;
-        Console.WriteLine($"[SteamClient] Requesting manifest download via Steam console...");
-        Console.WriteLine($"[SteamClient] Command: steam.exe {commandArgs}");
+        Console.WriteLine($"   >> {manifestCommand} <<");
+        Console.ForegroundColor = ConsoleColor.White;
+        Console.WriteLine("\n Instrucciones:");
+        Console.WriteLine("   1. En la ventana de Steam (pestaña CONSOLE ya abierta):");
+        Console.WriteLine("   2. Haz clic en la caja de texto inferior, presiona Ctrl+V y pulsa Enter.");
+        Console.WriteLine("=========================================================================");
         Console.ResetColor();
 
+        // Also launch steam.exe with args in case Steam was not running or cold-booted
         try
         {
             if (File.Exists(steamExe))
@@ -96,33 +123,19 @@ public static class SteamManifestHarvester
                 };
                 Process.Start(psi);
             }
-            else
-            {
-                var uri = $"steam://nav/console";
-                Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true });
-            }
         }
-        catch (Exception ex)
-        {
-            return new HarvestResult(
-                Success: false,
-                AppId: appId,
-                DepotId: depotId,
-                ManifestId: manifestId,
-                FilePath: null,
-                Sha256Hash: null,
-                FileSizeBytes: 0,
-                ErrorMessage: $"Failed to invoke Steam download command: {ex.Message}",
-                FromCache: false
-            );
-        }
+        catch { }
 
-        // 4. Await file appearance via watcher + polling
+        // 4. Await file appearance via watcher + polling with live spinner
         try
         {
             using (linkedCts.Token.Register(() => fileTcs.TrySetCanceled()))
             {
                 var pollInterval = TimeSpan.FromMilliseconds(250);
+                var startTime = Stopwatch.GetTimestamp();
+                char[] spinner = ['|', '/', '-', '\\'];
+                int spinIdx = 0;
+
                 while (!fileTcs.Task.IsCompleted && !linkedCts.Token.IsCancellationRequested)
                 {
                     if (File.Exists(cacheFilePath))
@@ -130,14 +143,19 @@ public static class SteamManifestHarvester
                         fileTcs.TrySetResult(true);
                         break;
                     }
+
+                    var elapsed = Stopwatch.GetElapsedTime(startTime);
+                    Console.Write($"\r[Esperando en depotcache] {spinner[spinIdx++ % spinner.Length]} {elapsed.TotalSeconds:0}s / {timeout.TotalSeconds:0}s...   ");
                     await Task.Delay(pollInterval, linkedCts.Token).ConfigureAwait(false);
                 }
 
+                Console.WriteLine();
                 await fileTcs.Task.ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
         {
+            Console.WriteLine();
             if (ct.IsCancellationRequested)
             {
                 throw;
@@ -330,6 +348,27 @@ public static class SteamManifestHarvester
                 // File still being written by Steam
             }
             await Task.Delay(100, ct).ConfigureAwait(false);
+        }
+    }
+
+    public static bool TryCopyToClipboard(string text)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                Arguments = $"-NoProfile -Command \"Set-Clipboard -Value '{text.Replace("'", "''")}'\"",
+                CreateNoWindow = true,
+                UseShellExecute = false
+            };
+            using var proc = Process.Start(psi);
+            proc?.WaitForExit(2000);
+            return true;
+        }
+        catch
+        {
+            return false;
         }
     }
 }

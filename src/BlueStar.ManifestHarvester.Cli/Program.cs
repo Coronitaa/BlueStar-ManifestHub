@@ -169,7 +169,7 @@ public static class Program
         }
 
         string destDir = Path.Combine(repoRoot, "manifests");
-        return await ExecuteDownloadAsync(steamPath, appId, depotId, manifestId, destDir, TimeSpan.FromSeconds(30), repoRoot);
+        return await ExecuteDownloadAsync(steamPath, appId, depotId, manifestId, destDir, TimeSpan.FromSeconds(60), repoRoot);
     }
 
     private static async Task<int> HandleDownloadCommandAsync(string[] args, string steamPath, bool isRunning, string repoRoot)
@@ -178,7 +178,7 @@ public static class Program
         uint depotId = 0;
         ulong manifestId = 0;
         string destDir = Path.Combine(repoRoot, "manifests");
-        int timeoutSec = 30;
+        int timeoutSec = 60;
 
         for (int i = 1; i < args.Length; i++)
         {
@@ -278,7 +278,7 @@ public static class Program
         string demandPath = Path.Combine(repoRoot, "indices", "demand.json");
         string destDir = Path.Combine(repoRoot, "manifests");
         string contributor = account?.PersonaName ?? "Coronita";
-        int timeoutSec = 30;
+        int timeoutSec = 60;
         bool autoConfirm = false;
 
         for (int i = 1; i < args.Length; i++)
