@@ -2,6 +2,22 @@
   {
     "schemaVersion": "v1",
     "appId": 105600,
+    "buildId": 2,
+    "timestamp": "2022-11-18T06:19:15+00:00",
+    "creationTime": "2022-11-18T06:19:15+00:00",
+    "branch": "public",
+    "description": "Build snapshot 2 for App 105600 (public)",
+    "depotManifests": {
+      "105601": 8046724853517638985,
+      "105602": 6844625161744350207,
+      "105603": 5312595479056093124
+    },
+    "patchDate": "2022-11-18",
+    "changedDepots": []
+  },
+  {
+    "schemaVersion": "v1",
+    "appId": 105600,
     "buildId": 1,
     "timestamp": "2022-11-18T06:19:15+00:00",
     "creationTime": "2022-11-18T06:19:15+00:00",
