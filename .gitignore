@@ -8,3 +8,7 @@ TestResults/
 *.tmp*
 staging/
 logs/
+config/
+*.auth.json
+steam_auth.json
+

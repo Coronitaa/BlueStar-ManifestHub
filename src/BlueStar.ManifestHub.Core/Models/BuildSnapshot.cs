@@ -26,6 +26,18 @@ public sealed class BuildSnapshot
     [JsonPropertyName("creationTime")]
     public DateTimeOffset? CreationTime { get; init; }
 
+    /// <summary>
+    /// Certainty level of the date: Verified (from Authentic Valve protobuf), Estimated, or Unknown.
+    /// </summary>
+    [JsonPropertyName("dateCertainty")]
+    public DateCertainty DateQuality { get; init; } = DateCertainty.Unknown;
+
+    /// <summary>
+    /// Completeness status of the snapshot depots.
+    /// </summary>
+    [JsonPropertyName("completeness")]
+    public SnapshotCompleteness Completeness { get; init; } = SnapshotCompleteness.Complete;
+
     [JsonPropertyName("branch")]
     public string Branch { get; init; } = "public";
 
@@ -42,7 +54,7 @@ public sealed class BuildSnapshot
 
     /// <summary>
     /// Patch release date string (YYYY-MM-DD) or authentic date identifier.
-    /// Derived automatically from CreationTime or Timestamp if not explicitly set.
+    /// Derived automatically from CreationTime only when verified.
     /// </summary>
     [JsonPropertyName("patchDate")]
     public string PatchDate

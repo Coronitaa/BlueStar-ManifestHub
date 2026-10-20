@@ -582,6 +582,99 @@ public sealed class HubReceiverServer : IAsyncDisposable
             return Results.Content(json, "application/json");
         });
 
+        // 6b. Binary manifest serving endpoint
+        app.MapGet("/manifests/{depotId}/{manifestId}.manifest", (string depotId, string manifestId) =>
+        {
+            if (!uint.TryParse(depotId, out uint numericDepotId) || !ulong.TryParse(manifestId, out ulong numericManifestId))
+            {
+                return Results.BadRequest(new { error = "Invalid DepotId or ManifestId." });
+            }
+
+            string path = _storageManager.GetManifestPath(numericDepotId, numericManifestId);
+            if (!File.Exists(path))
+            {
+                return Results.NotFound(new { error = $"Manifest {numericManifestId} for depot {numericDepotId} not found." });
+            }
+
+            return Results.File(path, "application/octet-stream", enableRangeProcessing: true);
+        });
+
+        // 6c. Manifest metadata endpoint
+        app.MapGet("/api/v1/manifests/{depotId}/{manifestId}/metadata", async (string depotId, string manifestId, CancellationToken cancellationToken) =>
+        {
+            if (!uint.TryParse(depotId, out uint numericDepotId) || !ulong.TryParse(manifestId, out ulong numericManifestId))
+            {
+                return Results.BadRequest(new { error = "Invalid DepotId or ManifestId." });
+            }
+
+            var revision = await _storageManager.GetManifestRevisionAsync(numericDepotId, numericManifestId, cancellationToken);
+            if (revision == null)
+            {
+                return Results.NotFound(new { error = $"Metadata for manifest {numericManifestId} (depot {numericDepotId}) not found." });
+            }
+
+            return Results.Ok(revision);
+        });
+
+        // 6d. Paged build history endpoint
+        app.MapGet("/api/v1/builds/{appId}/history", async (string appId, string? branch, int? page, int? pageSize, CancellationToken cancellationToken) =>
+        {
+            if (!uint.TryParse(appId, out uint numericAppId))
+            {
+                return Results.BadRequest(new { error = "Invalid AppId." });
+            }
+
+            var result = await _storageManager.GetBuildHistoryPagedAsync(
+                numericAppId,
+                branch,
+                page ?? 1,
+                pageSize ?? 20,
+                cancellationToken);
+
+            return Results.Ok(result);
+        });
+
+        // 6e. Single build snapshot detail endpoint
+        app.MapGet("/api/v1/builds/{appId}/{buildId}", async (string appId, string buildId, CancellationToken cancellationToken) =>
+        {
+            if (!uint.TryParse(appId, out uint numericAppId) || !ulong.TryParse(buildId, out ulong numericBuildId))
+            {
+                return Results.BadRequest(new { error = "Invalid AppId or BuildId." });
+            }
+
+            var snapshot = await _storageManager.GetBuildSnapshotByIdAsync(numericAppId, numericBuildId, cancellationToken);
+            if (snapshot == null)
+            {
+                return Results.NotFound(new { error = $"Build snapshot {numericBuildId} not found for App {numericAppId}." });
+            }
+
+            return Results.Ok(snapshot);
+        });
+
+        // 6f. Snapshot comparison / differential plan endpoint
+        app.MapGet("/api/v1/builds/{appId}/compare", async (string appId, ulong? baseBuildId, ulong? targetBuildId, CancellationToken cancellationToken) =>
+        {
+            if (!uint.TryParse(appId, out uint numericAppId))
+            {
+                return Results.BadRequest(new { error = "Invalid AppId." });
+            }
+
+            if (!targetBuildId.HasValue || targetBuildId.Value == 0)
+            {
+                return Results.BadRequest(new { error = "targetBuildId is required and must be greater than 0." });
+            }
+
+            try
+            {
+                var diff = await _storageManager.CompareSnapshotsAsync(numericAppId, baseBuildId, targetBuildId.Value, cancellationToken);
+                return Results.Ok(diff);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.NotFound(new { error = ex.Message });
+            }
+        });
+
         // 7. Bulk / Targeted coverage query endpoint
         app.MapPost("/api/v1/coverage/query", async (HttpContext context, CancellationToken cancellationToken) =>
         {
@@ -765,6 +858,12 @@ public sealed class HubReceiverServer : IAsyncDisposable
 
     private static string GetClientIp(HttpContext context)
     {
+        var remoteIp = context.Connection.RemoteIpAddress;
+        if (remoteIp != null && !System.Net.IPAddress.IsLoopback(remoteIp))
+        {
+            return remoteIp.ToString();
+        }
+
         var forwardedFor = context.Request.Headers["X-Forwarded-For"].FirstOrDefault();
         if (!string.IsNullOrWhiteSpace(forwardedFor))
         {
@@ -781,7 +880,7 @@ public sealed class HubReceiverServer : IAsyncDisposable
             return realIp.Trim();
         }
 
-        return context.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
+        return remoteIp?.ToString() ?? "127.0.0.1";
     }
 }
 

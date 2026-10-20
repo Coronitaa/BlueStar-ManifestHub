@@ -342,7 +342,15 @@ public sealed class StardustLedgerManager
                 if (string.IsNullOrWhiteSpace(line))
                     continue;
 
-                var entry = HubJsonSerializer.Deserialize<StardustLedgerEntry>(line.Trim());
+                StardustLedgerEntry? entry = null;
+                try
+                {
+                    entry = HubJsonSerializer.Deserialize<StardustLedgerEntry>(line.Trim());
+                }
+                catch
+                {
+                    // Ignore corrupted or partial line to prevent whole ledger locking
+                }
                 if (entry != null)
                 {
                     list.Add(entry);

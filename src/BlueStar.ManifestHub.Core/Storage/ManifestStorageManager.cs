@@ -579,6 +579,8 @@ public sealed class ManifestStorageManager
                 BuildId = s.BuildId,
                 Timestamp = s.Timestamp,
                 CreationTime = s.CreationTime,
+                DateQuality = s.DateQuality,
+                Completeness = s.Completeness,
                 Branch = s.Branch,
                 Description = s.Description,
                 DepotManifests = s.DepotManifests,
@@ -745,9 +747,24 @@ public sealed class ManifestStorageManager
 
     #region Catalog Indices (Depots & Apps)
 
-    private async Task UpdateDepotIndexAsync(uint depotId, ulong manifestId, CancellationToken cancellationToken)
+    public async Task UpdateDepotIndexAsync(uint depotId, ulong manifestId, CancellationToken cancellationToken = default)
     {
         string depotIndexPath = GetDepotIndexPath();
+
+        // Resolve AppId BEFORE acquiring _indexLock to avoid non-reentrant deadlock!
+        uint resolvedAppId = 0;
+        try
+        {
+            var appRec = await GetAppRecordByDepotIdAsync(depotId, cancellationToken);
+            if (appRec != null)
+            {
+                resolvedAppId = appRec.AppId;
+            }
+        }
+        catch
+        {
+            // Best effort
+        }
 
         await _indexLock.WaitAsync(cancellationToken);
         try
@@ -765,13 +782,16 @@ public sealed class ManifestStorageManager
 
             string key = depotId.ToString();
             List<ulong> manifestList = new();
-            uint appId = 0;
+            uint appId = resolvedAppId;
             string name = string.Empty;
 
             if (depots.TryGetValue(key, out var currentRecord))
             {
                 manifestList.AddRange(currentRecord.ManifestIds);
-                appId = currentRecord.AppId;
+                if (currentRecord.AppId != 0)
+                {
+                    appId = currentRecord.AppId;
+                }
                 name = currentRecord.Name;
             }
 
@@ -1243,6 +1263,145 @@ public sealed class ManifestStorageManager
         {
             _indexLock.Release();
         }
+    }
+
+    #endregion
+
+    #region Extended History & Diff Queries
+
+    public async Task<BuildSnapshot?> GetBuildSnapshotByIdAsync(uint appId, ulong buildId, CancellationToken cancellationToken = default)
+    {
+        var snapshots = await GetBuildSnapshotsAsync(appId, cancellationToken);
+        return snapshots.FirstOrDefault(s => s.BuildId == buildId);
+    }
+
+    public async Task<BuildHistoryPage> GetBuildHistoryPagedAsync(
+        uint appId,
+        string? branch = null,
+        int page = 1,
+        int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        if (page < 1) page = 1;
+        if (pageSize < 1) pageSize = 20;
+        if (pageSize > 100) pageSize = 100;
+
+        var allSnapshots = await GetBuildSnapshotsAsync(appId, cancellationToken);
+
+        IEnumerable<BuildSnapshot> query = allSnapshots;
+        if (!string.IsNullOrWhiteSpace(branch) && !string.Equals(branch, "*", StringComparison.OrdinalIgnoreCase))
+        {
+            query = query.Where(s => string.Equals(s.Branch, branch.Trim(), StringComparison.OrdinalIgnoreCase));
+        }
+
+        var ordered = query
+            .OrderByDescending(s => s.CreationTime.HasValue)
+            .ThenByDescending(s => s.CreationTime ?? s.Timestamp)
+            .ThenByDescending(s => s.BuildId)
+            .ToList();
+
+        int totalItems = ordered.Count;
+        int totalPages = totalItems == 0 ? 0 : (int)Math.Ceiling((double)totalItems / pageSize);
+        var pagedItems = ordered.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+
+        return new BuildHistoryPage
+        {
+            AppId = appId,
+            Branch = string.IsNullOrWhiteSpace(branch) ? "all" : branch,
+            Page = page,
+            PageSize = pageSize,
+            TotalItems = totalItems,
+            TotalPages = totalPages,
+            Items = pagedItems
+        };
+    }
+
+    public async Task<SnapshotDiffResult> CompareSnapshotsAsync(
+        uint appId,
+        ulong? baseBuildId,
+        ulong targetBuildId,
+        CancellationToken cancellationToken = default)
+    {
+        var targetSnapshot = await GetBuildSnapshotByIdAsync(appId, targetBuildId, cancellationToken);
+        if (targetSnapshot == null)
+        {
+            throw new InvalidOperationException($"Target build snapshot {targetBuildId} not found for AppId {appId}.");
+        }
+
+        BuildSnapshot? baseSnapshot = null;
+        if (baseBuildId.HasValue && baseBuildId.Value > 0)
+        {
+            baseSnapshot = await GetBuildSnapshotByIdAsync(appId, baseBuildId.Value, cancellationToken);
+        }
+
+        var unchanged = new List<DepotDiffItem>();
+        var modified = new List<DepotDiffItem>();
+        var added = new List<DepotDiffItem>();
+        var removed = new List<DepotDiffItem>();
+
+        var baseDepots = baseSnapshot?.DepotManifests ?? new Dictionary<uint, ulong>();
+        var targetDepots = targetSnapshot.DepotManifests;
+
+        long totalDownloadBytes = 0;
+        long totalSavedBytes = 0;
+
+        bool isComplete = targetSnapshot.Completeness == SnapshotCompleteness.Complete &&
+                          (baseSnapshot == null || baseSnapshot.Completeness == SnapshotCompleteness.Complete);
+        string? warningMessage = isComplete ? null : "One or both compared snapshots are partial; differential plan should be used conservatively.";
+
+        foreach (var (depotId, targetManifestId) in targetDepots)
+        {
+            long sizeBytes = 0;
+            var meta = await GetManifestRevisionAsync(depotId, targetManifestId, cancellationToken);
+            if (meta != null && meta.SizeOriginal > 0)
+            {
+                sizeBytes = meta.SizeOriginal;
+            }
+            bool available = ManifestExists(depotId, targetManifestId);
+
+            if (baseDepots.TryGetValue(depotId, out ulong baseManifestId))
+            {
+                if (baseManifestId == targetManifestId)
+                {
+                    unchanged.Add(new DepotDiffItem(depotId, baseManifestId, targetManifestId, sizeBytes, DepotDiffStatus.Unchanged, available));
+                    totalSavedBytes += sizeBytes;
+                }
+                else
+                {
+                    modified.Add(new DepotDiffItem(depotId, baseManifestId, targetManifestId, sizeBytes, DepotDiffStatus.Modified, available));
+                    totalDownloadBytes += sizeBytes;
+                }
+            }
+            else
+            {
+                added.Add(new DepotDiffItem(depotId, null, targetManifestId, sizeBytes, DepotDiffStatus.Added, available));
+                totalDownloadBytes += sizeBytes;
+            }
+        }
+
+        foreach (var (depotId, baseManifestId) in baseDepots)
+        {
+            if (!targetDepots.ContainsKey(depotId))
+            {
+                removed.Add(new DepotDiffItem(depotId, baseManifestId, null, 0, DepotDiffStatus.Removed, true));
+            }
+        }
+
+        return new SnapshotDiffResult
+        {
+            AppId = appId,
+            BaseBuildId = baseBuildId,
+            TargetBuildId = targetBuildId,
+            Branch = targetSnapshot.Branch,
+            IsCompleteComparison = isComplete,
+            WarningMessage = warningMessage,
+            Unchanged = unchanged,
+            Modified = modified,
+            Added = added,
+            Removed = removed,
+            TotalDownloadSizeBytes = totalDownloadBytes,
+            TotalSavedSizeBytes = totalSavedBytes
+        };
     }
 
     #endregion

@@ -1,0 +1,584 @@
+{
+  "BlueStar.ManifestHub.sln": {
+    "mtime": 1792206286.77517,
+    "seen": 1792467593.6457186,
+    "ast_hash": "a546022e457a6cf996190606e1d7a153",
+    "semantic_hash": ""
+  },
+  "builds/10.json": {
+    "mtime": 1792170027.871996,
+    "seen": 1792467593.6457238,
+    "ast_hash": "975079653ed93173f03f04325300439e",
+    "semantic_hash": ""
+  },
+  "harvest.ps1": {
+    "mtime": 1792206473.712481,
+    "seen": 1792467593.6457262,
+    "ast_hash": "1da8adb7b6f33e9ab6f03a5472120c7b",
+    "semantic_hash": ""
+  },
+  "indices/apps.json": {
+    "mtime": 1792170027.873057,
+    "seen": 1792467593.6457274,
+    "ast_hash": "fcde6842897a839826b3d70ff5fec710",
+    "semantic_hash": ""
+  },
+  "indices/coverage.json": {
+    "mtime": 1792170027.8735802,
+    "seen": 1792467593.645729,
+    "ast_hash": "7b03cc933bddaa9ec396b45c1bf2de6d",
+    "semantic_hash": ""
+  },
+  "indices/demand.json": {
+    "mtime": 1792206506.9592087,
+    "seen": 1792467593.6457298,
+    "ast_hash": "675019c5bbac578cab71af2da0bfbefb",
+    "semantic_hash": ""
+  },
+  "indices/depots.json": {
+    "mtime": 1792198750.8794813,
+    "seen": 1792467593.645731,
+    "ast_hash": "5dee5895c1fa07cc6888d0a1d9a86ec9",
+    "semantic_hash": ""
+  },
+  "manifests/11/3018093494972814332.meta.json": {
+    "mtime": 1792118176.9293725,
+    "seen": 1792467593.6457322,
+    "ast_hash": "38f63873a002bc6c15385fc5e6ce97f8",
+    "semantic_hash": ""
+  },
+  "manifests/11/4720911300072406946.meta.json": {
+    "mtime": 1792118176.9669266,
+    "seen": 1792467593.645733,
+    "ast_hash": "0088b29a8b1d12aa89f3f4550f7cbd8f",
+    "semantic_hash": ""
+  },
+  "manifests/12/4249506477070150661.meta.json": {
+    "mtime": 1792118176.9834647,
+    "seen": 1792467593.6457338,
+    "ast_hash": "ddb9c69514ac07c742f18a127809f559",
+    "semantic_hash": ""
+  },
+  "manifests/12/7476629819067189879.meta.json": {
+    "mtime": 1792118177.0018482,
+    "seen": 1792467593.645735,
+    "ast_hash": "f77bf12e61c9234f3b420d3a64b6865c",
+    "semantic_hash": ""
+  },
+  "manifests/13/1596103708518313909.meta.json": {
+    "mtime": 1792118177.0184853,
+    "seen": 1792467593.6457362,
+    "ast_hash": "ff5eaad85108e1230f3446bc7071046d",
+    "semantic_hash": ""
+  },
+  "manifests/13/8121279989947809180.meta.json": {
+    "mtime": 1792118177.0205443,
+    "seen": 1792467593.645737,
+    "ast_hash": "a7747a002509315cfc26e1ce6ec2dbc4",
+    "semantic_hash": ""
+  },
+  "manifests/14/4163740413628378088.meta.json": {
+    "mtime": 1792118177.0401044,
+    "seen": 1792467593.645738,
+    "ast_hash": "b518537b105c8cf2faac37e1b8faea90",
+    "semantic_hash": ""
+  },
+  "manifests/14/797471157445930276.meta.json": {
+    "mtime": 1792118177.1210692,
+    "seen": 1792467593.645739,
+    "ast_hash": "4cad68636c30bf6e9066e3fde363bca6",
+    "semantic_hash": ""
+  },
+  "manifests/15/2951655054604220030.meta.json": {
+    "mtime": 1792118177.1326635,
+    "seen": 1792467593.6457398,
+    "ast_hash": "475220c6ace7d12350bb43765b813305",
+    "semantic_hash": ""
+  },
+  "manifests/15/347793025475409008.meta.json": {
+    "mtime": 1792118177.1422465,
+    "seen": 1792467593.6457407,
+    "ast_hash": "36e53c7165d808845a4245699f783d78",
+    "semantic_hash": ""
+  },
+  "manifests/17/3300893578491173381.meta.json": {
+    "mtime": 1792118177.1578617,
+    "seen": 1792467593.6457415,
+    "ast_hash": "9e88d66796c07e61811c97b3d9d25a7a",
+    "semantic_hash": ""
+  },
+  "manifests/17/8232848132911478974.meta.json": {
+    "mtime": 1792118177.1598644,
+    "seen": 1792467593.6457427,
+    "ast_hash": "7afb23e34a0ac70484f8a0b68e5913ce",
+    "semantic_hash": ""
+  },
+  "manifests/18/2731601746579743404.meta.json": {
+    "mtime": 1792118177.1618612,
+    "seen": 1792467593.6457436,
+    "ast_hash": "626c1e1c4fbfb1e8e7f98b05eb95be0d",
+    "semantic_hash": ""
+  },
+  "manifests/18/9210252686867714338.meta.json": {
+    "mtime": 1792118177.1738613,
+    "seen": 1792467593.6457443,
+    "ast_hash": "ab7d652489a23c6c23bbd28fc170d4b3",
+    "semantic_hash": ""
+  },
+  "manifests/19/4715338954315985237.meta.json": {
+    "mtime": 1792118177.1758611,
+    "seen": 1792467593.6457455,
+    "ast_hash": "fe0dc145e2243eea27cf85452a4fa389",
+    "semantic_hash": ""
+  },
+  "manifests/19/5149037574830114753.meta.json": {
+    "mtime": 1792118177.1828628,
+    "seen": 1792467593.6457467,
+    "ast_hash": "668d694fd880d79058ce6e66d8ce73f9",
+    "semantic_hash": ""
+  },
+  "manifests/732/4838168794881920171.meta.json": {
+    "mtime": 1792198750.8800104,
+    "seen": 1792467593.6457474,
+    "ast_hash": "d3114d136d784f059412366231554230",
+    "semantic_hash": ""
+  },
+  "manifests/732/5289214263727115270.meta.json": {
+    "mtime": 1792198750.8825307,
+    "seen": 1792467593.6457484,
+    "ast_hash": "dbad6583491979f0c0056c8bda45c77f",
+    "semantic_hash": ""
+  },
+  "manifests/95/7685864384078520360.meta.json": {
+    "mtime": 1792118177.184862,
+    "seen": 1792467593.6457496,
+    "ast_hash": "3e9592077194c3532d130863b32a867b",
+    "semantic_hash": ""
+  },
+  "schemas/v1/manifest-hub.schema.json": {
+    "mtime": 1792088600.732826,
+    "seen": 1792467593.6457503,
+    "ast_hash": "fcc5b975089174e89ffb8cb3fd07f39b",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHarvester.Cli/BlueStar.ManifestHarvester.Cli.csproj": {
+    "mtime": 1792208978.7091892,
+    "seen": 1792467593.6457512,
+    "ast_hash": "265381f05776676a874bd6e4270d06c7",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHarvester.Cli/LocalLicenseReader.cs": {
+    "mtime": 1792206218.0548463,
+    "seen": 1792467593.6457524,
+    "ast_hash": "1a6b9094060ba084ba9213930eac73d5",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHarvester.Cli/Program.cs": {
+    "mtime": 1792209135.9463034,
+    "seen": 1792467593.6457531,
+    "ast_hash": "37e76595e8a7d84924ff462df8c41fdf",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHarvester.Cli/SteamLocator.cs": {
+    "mtime": 1792206206.371168,
+    "seen": 1792467593.645754,
+    "ast_hash": "8b9259e0ea33b77af1299f8e2e180196",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHarvester.Cli/SteamManifestHarvester.cs": {
+    "mtime": 1792207496.916314,
+    "seen": 1792467593.6457548,
+    "ast_hash": "86259e2ee8be33a7a8fa6ff994621875",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHarvester.Cli/SteamQrAuthenticator.cs": {
+    "mtime": 1792209173.2202034,
+    "seen": 1792467593.645756,
+    "ast_hash": "fd7b0b50f84bb1b872cb61728b4802af",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Cli/BlueStar.ManifestHub.Cli.csproj": {
+    "mtime": 1792100638.5702176,
+    "seen": 1792467593.6457632,
+    "ast_hash": "3884ac06928f8fa6de7d951c843da17c",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Cli/Program.cs": {
+    "mtime": 1792198750.8845296,
+    "seen": 1792467593.6457648,
+    "ast_hash": "d570969290f8c749ac7bcce9465b2378",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/BlueStar.ManifestHub.Core.csproj": {
+    "mtime": 1792100627.806813,
+    "seen": 1792467593.6457665,
+    "ast_hash": "75fc2cecd397a25cfc8e4cdbefbb72c1",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Demand/DemandEngine.cs": {
+    "mtime": 1792198750.8855307,
+    "seen": 1792467593.6457677,
+    "ast_hash": "cb7dff0709a9e7d268f615b828a2093b",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Ingestion/Adapters/DepotBoxSourceAdapter.cs": {
+    "mtime": 1792198750.8865292,
+    "seen": 1792467593.6457686,
+    "ast_hash": "30795c52b930370c4c4fdc1d6cee787f",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Ingestion/Adapters/DiscoveredManifest.cs": {
+    "mtime": 1792096422.3170853,
+    "seen": 1792467593.6457694,
+    "ast_hash": "4e6e91ff8a8dc1f76f33b11ca6a15979",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Ingestion/Adapters/IManifestSourceAdapter.cs": {
+    "mtime": 1792089225.651758,
+    "seen": 1792467593.6457705,
+    "ast_hash": "a8ba983e790986446fb64c80b047fb12",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Ingestion/Adapters/K25SourceAdapter.cs": {
+    "mtime": 1792198750.8875308,
+    "seen": 1792467593.6457713,
+    "ast_hash": "6e4cb48b6d16ad6f6ae5e563a808e005",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Ingestion/Adapters/ManifestHub2SourceAdapter.cs": {
+    "mtime": 1792198750.888531,
+    "seen": 1792467593.6457722,
+    "ast_hash": "bcf7c6d204c2620dc8e50d9a0a4b44cd",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Ingestion/FileCoordinatedRateGovernor.cs": {
+    "mtime": 1792089190.8055387,
+    "seen": 1792467593.6457734,
+    "ast_hash": "228365cfeb74a7d7c09c4af176f0842a",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Ingestion/IGlobalRateGovernor.cs": {
+    "mtime": 1792089149.3088927,
+    "seen": 1792467593.6457748,
+    "ast_hash": "4d15a3c17202f251f00cb53460e0c4a5",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Ingestion/IngestionBatchSummary.cs": {
+    "mtime": 1792089319.5171719,
+    "seen": 1792467593.645776,
+    "ast_hash": "642651d7a9ca4007f5ab5e3480f7457e",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Ingestion/IngestionPipeline.cs": {
+    "mtime": 1792118177.2651176,
+    "seen": 1792467593.645777,
+    "ast_hash": "457e7726f38b6eb4c33f69e8702a7a70",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Ingestion/IngestionPipelineOptions.cs": {
+    "mtime": 1792089325.380307,
+    "seen": 1792467593.645778,
+    "ast_hash": "623fa455817c875abc7d218e7debf1fa",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Ingestion/RateGovernorOptions.cs": {
+    "mtime": 1792089158.8207076,
+    "seen": 1792467593.6457787,
+    "ast_hash": "f6d18cca08afa4d8b1b2ffb1989decf7",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Ledger/LedgerExceptions.cs": {
+    "mtime": 1792087616.6857176,
+    "seen": 1792467593.6457796,
+    "ast_hash": "a07472c4aef3279d0bd03dea9abf544c",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Ledger/LedgerIntegrityResult.cs": {
+    "mtime": 1792087622.44345,
+    "seen": 1792467593.6457806,
+    "ast_hash": "7c907482de28ace2fbb164dd91d0b016",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Ledger/StardustLedgerManager.cs": {
+    "mtime": 1792466985.316187,
+    "seen": 1792467593.6457815,
+    "ast_hash": "cfd9523f1bc63250bf0eb992bcaf7d64",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Models/AppRecord.cs": {
+    "mtime": 1792087389.850002,
+    "seen": 1792467593.6457825,
+    "ast_hash": "79998e506a974db18132995dff549c22",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Models/BuildHistoryPage.cs": {
+    "mtime": 1792466582.8730423,
+    "seen": 1792467593.6457837,
+    "ast_hash": "53c5043a314a80cc04795e104148c6a3",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Models/BuildSnapshot.cs": {
+    "mtime": 1792467411.6589262,
+    "seen": 1792467593.6457846,
+    "ast_hash": "b97f294ed3f90c4de596bc06001fa899",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Models/ContributionRecord.cs": {
+    "mtime": 1792087433.766817,
+    "seen": 1792467593.6457853,
+    "ast_hash": "598b5b3d9efdbe360641a95058b4dc97",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Models/CoverageRecord.cs": {
+    "mtime": 1792087426.994931,
+    "seen": 1792467593.645786,
+    "ast_hash": "edca3a214ba4d330ed2ed0653494619b",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Models/DateCertainty.cs": {
+    "mtime": 1792466528.0160034,
+    "seen": 1792467593.6457872,
+    "ast_hash": "a61b4890f5ff8bb46ac02eb3de33882d",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Models/DemandRecord.cs": {
+    "mtime": 1792198750.8907194,
+    "seen": 1792467593.6457882,
+    "ast_hash": "d1268ecca1d9419af5762a0f2eb013e3",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Models/DepotChangeEvent.cs": {
+    "mtime": 1792087416.2806163,
+    "seen": 1792467593.6457891,
+    "ast_hash": "06482ad39badb663067ae09e63f5d33e",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Models/DepotRecord.cs": {
+    "mtime": 1792087394.5594096,
+    "seen": 1792467593.64579,
+    "ast_hash": "18748b6ccd837584db8b1b5d2e2edff2",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Models/ManifestRevision.cs": {
+    "mtime": 1792118177.2940075,
+    "seen": 1792467593.645791,
+    "ast_hash": "6bfd9140a2272dfb78f764425884d72f",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Models/ManifestStatus.cs": {
+    "mtime": 1792087383.74997,
+    "seen": 1792467593.645792,
+    "ast_hash": "f9965370dda9ce191dae80b7fecf5680",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Models/SnapshotCompleteness.cs": {
+    "mtime": 1792466533.592053,
+    "seen": 1792467593.645793,
+    "ast_hash": "b73a8fccaf92b1c74a585b0381aee6ab",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Models/SnapshotDiffResult.cs": {
+    "mtime": 1792466570.5854957,
+    "seen": 1792467593.6457937,
+    "ast_hash": "adc76d2c0bbd27fbb862e477a674b712",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Models/SourceRecord.cs": {
+    "mtime": 1792087421.6101077,
+    "seen": 1792467593.6457949,
+    "ast_hash": "bbd826486efe24ee1f8ac0f4bf166ca4",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Models/StardustLedgerEntry.cs": {
+    "mtime": 1792087441.1151192,
+    "seen": 1792467593.6457956,
+    "ast_hash": "593be3de798a85ad6862e8f4ba0052bd",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Receiver/HubReceiverOptions.cs": {
+    "mtime": 1792118177.305122,
+    "seen": 1792467593.6457965,
+    "ast_hash": "bacdd9002f451b5caf9f476383214325",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Receiver/HubReceiverServer.cs": {
+    "mtime": 1792467030.4026837,
+    "seen": 1792467593.6457975,
+    "ast_hash": "e49098ade5e22c65723729805e89affe",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Receiver/ReceiverModels.cs": {
+    "mtime": 1792118177.3409784,
+    "seen": 1792467593.6457984,
+    "ast_hash": "b5b2bbe37d916cb930bce2d9884f110e",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Serialization/HubJsonSerializer.cs": {
+    "mtime": 1792087785.2306929,
+    "seen": 1792467593.6457992,
+    "ast_hash": "68b279123e58e1595d070c6fddfc2051",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Serialization/ProtobufMiniParser.cs": {
+    "mtime": 1792088533.4491675,
+    "seen": 1792467593.6457999,
+    "ast_hash": "d0b2a6a64f4411c97f8e5c18e01d38a4",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Storage/ManifestStorageManager.cs": {
+    "mtime": 1792467520.8558414,
+    "seen": 1792467593.645801,
+    "ast_hash": "429ca86bfec2497ab6d88f0df242a39a",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Storage/PublishResult.cs": {
+    "mtime": 1792087573.339027,
+    "seen": 1792467593.645802,
+    "ast_hash": "86ba3e3fdf8a36d35c4a6e6ceac9bc98",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Storage/StorageOptions.cs": {
+    "mtime": 1792198750.8927186,
+    "seen": 1792467593.6458027,
+    "ast_hash": "c4512dd30c4846a2ec88fe1e94a8cad8",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Validation/ManifestValidationResult.cs": {
+    "mtime": 1792096442.7895179,
+    "seen": 1792467593.6458035,
+    "ast_hash": "d861ec0fd05d0f5dbeb932361c1c2435",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Validation/ManifestValidator.cs": {
+    "mtime": 1792198750.893719,
+    "seen": 1792467593.6458046,
+    "ast_hash": "b38616c1b9dcd138bf791368c58175cc",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Webhooks/WebhookLogReporter.cs": {
+    "mtime": 1792090494.2108033,
+    "seen": 1792467593.6458054,
+    "ast_hash": "4577fbfc21296b0af07223541679acfc",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Webhooks/WebhookModels.cs": {
+    "mtime": 1792089390.0596943,
+    "seen": 1792467593.6458063,
+    "ast_hash": "afb30e9f4aa4d7ea6ada5dd223b34735",
+    "semantic_hash": ""
+  },
+  "src/BlueStar.ManifestHub.Core/Webhooks/WebhookProcessor.cs": {
+    "mtime": 1792100789.3305814,
+    "seen": 1792467593.6458075,
+    "ast_hash": "7c830f05336da2b929fb3bc661de0019",
+    "semantic_hash": ""
+  },
+  "tests/BlueStar.ManifestHub.Tests/AdapterTests.cs": {
+    "mtime": 1792198750.8947184,
+    "seen": 1792467593.645809,
+    "ast_hash": "4fdd079a8cad0b44bc2bd71cbb0bcb8a",
+    "semantic_hash": ""
+  },
+  "tests/BlueStar.ManifestHub.Tests/BlueStar.ManifestHub.Tests.csproj": {
+    "mtime": 1792206379.197437,
+    "seen": 1792467593.64581,
+    "ast_hash": "ea21163225ebf552dfa34b78c42b1ed5",
+    "semantic_hash": ""
+  },
+  "tests/BlueStar.ManifestHub.Tests/DemandAndDeltaTests.cs": {
+    "mtime": 1792198750.8957188,
+    "seen": 1792467593.6458106,
+    "ast_hash": "0f0ac7032424c9f070887457265ad989",
+    "semantic_hash": ""
+  },
+  "tests/BlueStar.ManifestHub.Tests/HistoryAndDiffApiTests.cs": {
+    "mtime": 1792467458.8832047,
+    "seen": 1792467593.6458118,
+    "ast_hash": "2976fa4482717f2a2bd894334b99f154",
+    "semantic_hash": ""
+  },
+  "tests/BlueStar.ManifestHub.Tests/IngestionPipelineTests.cs": {
+    "mtime": 1792096708.2808154,
+    "seen": 1792467593.6458125,
+    "ast_hash": "8ea7933a36c74d35113b95696405ed6a",
+    "semantic_hash": ""
+  },
+  "tests/BlueStar.ManifestHub.Tests/ManifestHarvesterTests.cs": {
+    "mtime": 1792206398.3517768,
+    "seen": 1792467593.6458137,
+    "ast_hash": "696974d2782e54b7c3f89cb6effb7c17",
+    "semantic_hash": ""
+  },
+  "tests/BlueStar.ManifestHub.Tests/RateGovernorTests.cs": {
+    "mtime": 1792089511.5819705,
+    "seen": 1792467593.6458144,
+    "ast_hash": "eeb5dc76ae79167cf871924149a49bf8",
+    "semantic_hash": ""
+  },
+  "tests/BlueStar.ManifestHub.Tests/RemoteReceiverTests.cs": {
+    "mtime": 1792118177.430112,
+    "seen": 1792467593.6458166,
+    "ast_hash": "fea313eef5cecffe7a6de3b72e8cf6cd",
+    "semantic_hash": ""
+  },
+  "tests/BlueStar.ManifestHub.Tests/SnapshotAndCoverageTests.cs": {
+    "mtime": 1792198750.896719,
+    "seen": 1792467593.6458175,
+    "ast_hash": "bedbbcfc0ee96d5722b459195abe3400",
+    "semantic_hash": ""
+  },
+  "tests/BlueStar.ManifestHub.Tests/StardustLedgerTests.cs": {
+    "mtime": 1792088763.386001,
+    "seen": 1792467593.6458187,
+    "ast_hash": "333c5554a66c6f76eb21c22a726c8500",
+    "semantic_hash": ""
+  },
+  "tests/BlueStar.ManifestHub.Tests/StorageManagerTests.cs": {
+    "mtime": 1792095765.8261175,
+    "seen": 1792467593.6458194,
+    "ast_hash": "1c84c2fe8b8fcaa2a4d5a0df4cae7711",
+    "semantic_hash": ""
+  },
+  "tests/BlueStar.ManifestHub.Tests/TestManifestHelper.cs": {
+    "mtime": 1792118177.4502313,
+    "seen": 1792467593.6458204,
+    "ast_hash": "8c3fc5b9213c08be45bbcffd5bd9f111",
+    "semantic_hash": ""
+  },
+  "tests/BlueStar.ManifestHub.Tests/ValidationTests.cs": {
+    "mtime": 1792198750.8977191,
+    "seen": 1792467593.6458213,
+    "ast_hash": "ca73c0c450796aed411d751f28b8d8ef",
+    "semantic_hash": ""
+  },
+  "tests/BlueStar.ManifestHub.Tests/WebhookProcessorTests.cs": {
+    "mtime": 1792095748.5355127,
+    "seen": 1792467593.6458225,
+    "ast_hash": "0aac9b274374c8c93c6fa6f38f4cbe05",
+    "semantic_hash": ""
+  },
+  "tests/BlueStar.ManifestHub.Tests/WebhookSanitizationTests.cs": {
+    "mtime": 1792089594.7628894,
+    "seen": 1792467593.6458235,
+    "ast_hash": "a531818a8b9c4ac18a73deb8f4689ac0",
+    "semantic_hash": ""
+  },
+  ".github/workflows/ci.yml": {
+    "mtime": 1792198750.8756993,
+    "seen": 1792467593.6458244,
+    "ast_hash": "c95b132b97bc8a3e86a45dd35a628619",
+    "semantic_hash": ""
+  },
+  ".github/workflows/daily-ingest.yml": {
+    "mtime": 1792198750.8768957,
+    "seen": 1792467593.6458256,
+    "ast_hash": "c665bd43d372721180e2595cd9674776",
+    "semantic_hash": ""
+  },
+  "STATUS.md": {
+    "mtime": 1792466482.3834746,
+    "seen": 1792467593.6458266,
+    "ast_hash": "17366d7beff28e9782640970baffdf56",
+    "semantic_hash": ""
+  }
+}
