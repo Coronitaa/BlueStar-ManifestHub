@@ -8,7 +8,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 3018093494972814332,
-    "lastChecked": "2026-10-21T08:09:44.6327502+00:00"
+    "lastChecked": "2026-10-22T08:09:38.7810543+00:00"
   },
   "10:95": {
     "schemaVersion": "v1",
@@ -19,7 +19,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 7685864384078520360,
-    "lastChecked": "2026-10-21T08:09:44.6338833+00:00"
+    "lastChecked": "2026-10-22T08:09:38.7818208+00:00"
   },
   "10:12": {
     "schemaVersion": "v1",
@@ -30,7 +30,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 7476629819067189879,
-    "lastChecked": "2026-10-21T08:09:44.6347935+00:00"
+    "lastChecked": "2026-10-22T08:09:38.782567+00:00"
   },
   "10:13": {
     "schemaVersion": "v1",
@@ -41,7 +41,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 1596103708518313909,
-    "lastChecked": "2026-10-21T08:09:44.6357439+00:00"
+    "lastChecked": "2026-10-22T08:09:38.7833365+00:00"
   },
   "10:14": {
     "schemaVersion": "v1",
@@ -52,7 +52,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 4163740413628378088,
-    "lastChecked": "2026-10-21T08:09:44.6365971+00:00"
+    "lastChecked": "2026-10-22T08:09:38.7840073+00:00"
   },
   "10:15": {
     "schemaVersion": "v1",
@@ -63,7 +63,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 2951655054604220030,
-    "lastChecked": "2026-10-21T08:09:44.6374026+00:00"
+    "lastChecked": "2026-10-22T08:09:38.7846872+00:00"
   },
   "10:17": {
     "schemaVersion": "v1",
@@ -74,7 +74,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 8232848132911478974,
-    "lastChecked": "2026-10-21T08:09:44.6380503+00:00"
+    "lastChecked": "2026-10-22T08:09:38.7853897+00:00"
   },
   "10:18": {
     "schemaVersion": "v1",
@@ -85,7 +85,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 9210252686867714338,
-    "lastChecked": "2026-10-21T08:09:44.6388322+00:00"
+    "lastChecked": "2026-10-22T08:09:38.7860661+00:00"
   },
   "10:19": {
     "schemaVersion": "v1",
@@ -96,7 +96,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 5149037574830114753,
-    "lastChecked": "2026-10-21T08:09:44.6395589+00:00"
+    "lastChecked": "2026-10-22T08:09:38.7867577+00:00"
   },
   "10:142": {
     "schemaVersion": "v1",
@@ -106,7 +106,7 @@
     "availableRevisions": 0,
     "missingRevisions": 1,
     "coverageRatio": 0,
-    "lastChecked": "2026-10-21T08:09:44.6401899+00:00"
+    "lastChecked": "2026-10-22T08:09:38.7873607+00:00"
   },
   "730:732": {
     "schemaVersion": "v1",
@@ -117,7 +117,7 @@
     "missingRevisions": 2,
     "coverageRatio": 0.7143,
     "latestAvailableManifestId": 5289214263727115270,
-    "lastChecked": "2026-10-21T08:08:43.3388195+00:00"
+    "lastChecked": "2026-10-22T08:08:37.5368675+00:00"
   },
   "730:733": {
     "schemaVersion": "v1",
@@ -128,7 +128,7 @@
     "missingRevisions": 2,
     "coverageRatio": 0.7143,
     "latestAvailableManifestId": 4424357332715496898,
-    "lastChecked": "2026-10-21T08:08:43.3498819+00:00"
+    "lastChecked": "2026-10-22T08:08:37.5484341+00:00"
   },
   "730:731": {
     "schemaVersion": "v1",
@@ -139,7 +139,7 @@
     "missingRevisions": 1,
     "coverageRatio": 0.8571,
     "latestAvailableManifestId": 3779741820453041761,
-    "lastChecked": "2026-10-21T08:08:43.3512939+00:00"
+    "lastChecked": "2026-10-22T08:08:37.5500251+00:00"
   },
   "730:734": {
     "schemaVersion": "v1",
@@ -150,7 +150,7 @@
     "missingRevisions": 1,
     "coverageRatio": 0.8333,
     "latestAvailableManifestId": 7768479580354456865,
-    "lastChecked": "2026-10-21T08:08:43.3525857+00:00"
+    "lastChecked": "2026-10-22T08:08:37.5514216+00:00"
   },
   "730:735": {
     "schemaVersion": "v1",
@@ -161,7 +161,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 3280174514501358402,
-    "lastChecked": "2026-10-21T08:08:43.3537835+00:00"
+    "lastChecked": "2026-10-22T08:08:37.5530511+00:00"
   },
   "730:736": {
     "schemaVersion": "v1",
@@ -172,7 +172,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 2490448998702128989,
-    "lastChecked": "2026-10-21T08:08:43.3548673+00:00"
+    "lastChecked": "2026-10-22T08:08:37.5543727+00:00"
   },
   "730:737": {
     "schemaVersion": "v1",
@@ -183,7 +183,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 8932691733627569999,
-    "lastChecked": "2026-10-21T08:08:43.3560034+00:00"
+    "lastChecked": "2026-10-22T08:08:37.5558155+00:00"
   },
   "730:738": {
     "schemaVersion": "v1",
@@ -194,7 +194,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 5738276695377038638,
-    "lastChecked": "2026-10-21T08:08:43.3571007+00:00"
+    "lastChecked": "2026-10-22T08:08:37.5572263+00:00"
   },
   "730:2347770": {
     "schemaVersion": "v1",
@@ -205,7 +205,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 5023020258185551340,
-    "lastChecked": "2026-10-21T08:08:43.3582429+00:00"
+    "lastChecked": "2026-10-22T08:08:37.5590989+00:00"
   },
   "730:2347771": {
     "schemaVersion": "v1",
@@ -216,7 +216,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 366892905078765270,
-    "lastChecked": "2026-10-21T08:08:43.3594371+00:00"
+    "lastChecked": "2026-10-22T08:08:37.5604098+00:00"
   },
   "730:2347772": {
     "schemaVersion": "v1",
@@ -227,7 +227,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 4427303554736365309,
-    "lastChecked": "2026-10-21T08:08:43.3603819+00:00"
+    "lastChecked": "2026-10-22T08:08:37.5614114+00:00"
   },
   "730:2347773": {
     "schemaVersion": "v1",
@@ -238,7 +238,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 6261982168194353241,
-    "lastChecked": "2026-10-21T08:08:43.361524+00:00"
+    "lastChecked": "2026-10-22T08:08:37.5627627+00:00"
   },
   "730:2347774": {
     "schemaVersion": "v1",
@@ -249,7 +249,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 2710000399235967142,
-    "lastChecked": "2026-10-21T08:08:43.3625315+00:00"
+    "lastChecked": "2026-10-22T08:08:37.5637989+00:00"
   },
   "730:2347779": {
     "schemaVersion": "v1",
@@ -260,7 +260,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 1936241813406914436,
-    "lastChecked": "2026-10-21T08:08:43.3636883+00:00"
+    "lastChecked": "2026-10-22T08:08:37.5650684+00:00"
   },
   "570:373301": {
     "schemaVersion": "v1",
@@ -271,7 +271,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 7327918771545452700,
-    "lastChecked": "2026-10-21T08:08:45.9986401+00:00"
+    "lastChecked": "2026-10-22T08:08:40.1424832+00:00"
   },
   "570:381451": {
     "schemaVersion": "v1",
@@ -282,7 +282,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 3099179070422680664,
-    "lastChecked": "2026-10-21T08:08:46.0005429+00:00"
+    "lastChecked": "2026-10-22T08:08:40.1445168+00:00"
   },
   "570:381452": {
     "schemaVersion": "v1",
@@ -293,7 +293,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 5559429930528020871,
-    "lastChecked": "2026-10-21T08:08:46.0017009+00:00"
+    "lastChecked": "2026-10-22T08:08:40.1458795+00:00"
   },
   "570:381453": {
     "schemaVersion": "v1",
@@ -304,7 +304,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 5723651394550524659,
-    "lastChecked": "2026-10-21T08:08:46.0028032+00:00"
+    "lastChecked": "2026-10-22T08:08:40.1469418+00:00"
   },
   "570:381454": {
     "schemaVersion": "v1",
@@ -315,7 +315,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 3653281149075627225,
-    "lastChecked": "2026-10-21T08:08:46.0040981+00:00"
+    "lastChecked": "2026-10-22T08:08:40.1515539+00:00"
   },
   "570:381455": {
     "schemaVersion": "v1",
@@ -326,7 +326,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 1379877685178272800,
-    "lastChecked": "2026-10-21T08:08:46.005327+00:00"
+    "lastChecked": "2026-10-22T08:08:40.1574957+00:00"
   },
   "570:373302": {
     "schemaVersion": "v1",
@@ -337,7 +337,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 2258884513790295561,
-    "lastChecked": "2026-10-21T08:08:46.0064044+00:00"
+    "lastChecked": "2026-10-22T08:08:40.162462+00:00"
   },
   "570:373303": {
     "schemaVersion": "v1",
@@ -348,7 +348,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 2518563807909310866,
-    "lastChecked": "2026-10-21T08:08:46.0076007+00:00"
+    "lastChecked": "2026-10-22T08:08:40.1688022+00:00"
   },
   "570:373304": {
     "schemaVersion": "v1",
@@ -359,7 +359,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 7166575635598811404,
-    "lastChecked": "2026-10-21T08:08:46.0085022+00:00"
+    "lastChecked": "2026-10-22T08:08:40.1723765+00:00"
   },
   "570:373305": {
     "schemaVersion": "v1",
@@ -370,7 +370,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 8903775600571334631,
-    "lastChecked": "2026-10-21T08:08:46.0096977+00:00"
+    "lastChecked": "2026-10-22T08:08:40.1779775+00:00"
   },
   "570:373306": {
     "schemaVersion": "v1",
@@ -381,7 +381,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 5764620914835367791,
-    "lastChecked": "2026-10-21T08:08:46.0113791+00:00"
+    "lastChecked": "2026-10-22T08:08:40.218327+00:00"
   },
   "570:373307": {
     "schemaVersion": "v1",
@@ -392,7 +392,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 2636379485241555173,
-    "lastChecked": "2026-10-21T08:08:46.0127683+00:00"
+    "lastChecked": "2026-10-22T08:08:40.2196469+00:00"
   },
   "570:373308": {
     "schemaVersion": "v1",
@@ -403,7 +403,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 8126429463115692983,
-    "lastChecked": "2026-10-21T08:08:46.0139092+00:00"
+    "lastChecked": "2026-10-22T08:08:40.3107093+00:00"
   },
   "570:373309": {
     "schemaVersion": "v1",
@@ -414,7 +414,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 8243194691725980100,
-    "lastChecked": "2026-10-21T08:08:46.0152523+00:00"
+    "lastChecked": "2026-10-22T08:08:40.311857+00:00"
   },
   "570:381456": {
     "schemaVersion": "v1",
@@ -425,7 +425,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 8954184990626614529,
-    "lastChecked": "2026-10-21T08:08:46.0162197+00:00"
+    "lastChecked": "2026-10-22T08:08:40.3130053+00:00"
   },
   "570:381450": {
     "schemaVersion": "v1",
@@ -436,7 +436,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 2086719151889130007,
-    "lastChecked": "2026-10-21T08:08:46.0175219+00:00"
+    "lastChecked": "2026-10-22T08:08:40.314092+00:00"
   },
   "570:401531": {
     "schemaVersion": "v1",
@@ -447,7 +447,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 3442758096700779883,
-    "lastChecked": "2026-10-21T08:08:46.0184451+00:00"
+    "lastChecked": "2026-10-22T08:08:40.3151591+00:00"
   },
   "570:401535": {
     "schemaVersion": "v1",
@@ -458,7 +458,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 818256195465990382,
-    "lastChecked": "2026-10-21T08:08:46.0194021+00:00"
+    "lastChecked": "2026-10-22T08:08:40.3161749+00:00"
   },
   "570:401536": {
     "schemaVersion": "v1",
@@ -469,7 +469,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 8626830787987928686,
-    "lastChecked": "2026-10-21T08:08:46.0202935+00:00"
+    "lastChecked": "2026-10-22T08:08:40.3172214+00:00"
   },
   "440:441": {
     "schemaVersion": "v1",
@@ -480,7 +480,7 @@
     "missingRevisions": 3,
     "coverageRatio": 0.25,
     "latestAvailableManifestId": 6394200134843491781,
-    "lastChecked": "2026-10-21T08:09:04.772917+00:00"
+    "lastChecked": "2026-10-22T08:08:58.8361555+00:00"
   },
   "440:440": {
     "schemaVersion": "v1",
@@ -491,7 +491,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 1118032470228587934,
-    "lastChecked": "2026-10-21T08:09:04.7740604+00:00"
+    "lastChecked": "2026-10-22T08:08:58.837509+00:00"
   },
   "440:232251": {
     "schemaVersion": "v1",
@@ -502,7 +502,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 3602233681365136068,
-    "lastChecked": "2026-10-21T08:09:04.7755513+00:00"
+    "lastChecked": "2026-10-22T08:08:58.8425779+00:00"
   },
   "440:232252": {
     "schemaVersion": "v1",
@@ -513,7 +513,7 @@
     "missingRevisions": 3,
     "coverageRatio": 0.25,
     "latestAvailableManifestId": 678390272316880472,
-    "lastChecked": "2026-10-21T08:09:04.7765494+00:00"
+    "lastChecked": "2026-10-22T08:08:58.8436077+00:00"
   },
   "440:232253": {
     "schemaVersion": "v1",
@@ -524,7 +524,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 2103430481478111071,
-    "lastChecked": "2026-10-21T08:09:04.7775825+00:00"
+    "lastChecked": "2026-10-22T08:08:58.8446563+00:00"
   },
   "440:444": {
     "schemaVersion": "v1",
@@ -535,7 +535,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 646330807595077556,
-    "lastChecked": "2026-10-21T08:09:04.7785293+00:00"
+    "lastChecked": "2026-10-22T08:08:58.8456182+00:00"
   },
   "440:445": {
     "schemaVersion": "v1",
@@ -546,7 +546,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 5602233730528152354,
-    "lastChecked": "2026-10-21T08:09:04.7794903+00:00"
+    "lastChecked": "2026-10-22T08:08:58.8465716+00:00"
   },
   "440:446": {
     "schemaVersion": "v1",
@@ -557,7 +557,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 6215119033293728486,
-    "lastChecked": "2026-10-21T08:09:04.780422+00:00"
+    "lastChecked": "2026-10-22T08:08:58.8475373+00:00"
   },
   "440:448": {
     "schemaVersion": "v1",
@@ -568,7 +568,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 8469957949853360122,
-    "lastChecked": "2026-10-21T08:09:04.7814405+00:00"
+    "lastChecked": "2026-10-22T08:08:58.8484682+00:00"
   },
   "440:449": {
     "schemaVersion": "v1",
@@ -579,7 +579,7 @@
     "missingRevisions": 0,
     "coverageRatio": 1,
     "latestAvailableManifestId": 2451727451644207550,
-    "lastChecked": "2026-10-21T08:09:04.7822652+00:00"
+    "lastChecked": "2026-10-22T08:08:58.8492109+00:00"
   },
   "105600:105601": {
     "schemaVersion": "v1",
@@ -590,7 +590,7 @@
     "missingRevisions": 4,
     "coverageRatio": 0.2,
     "latestAvailableManifestId": 8046724853517638985,
-    "lastChecked": "2026-10-21T08:09:39.2851722+00:00"
+    "lastChecked": "2026-10-22T08:09:33.4398408+00:00"
   },
   "105600:105602": {
     "schemaVersion": "v1",
@@ -601,7 +601,7 @@
     "missingRevisions": 4,
     "coverageRatio": 0.2,
     "latestAvailableManifestId": 6844625161744350207,
-    "lastChecked": "2026-10-21T08:09:39.2863204+00:00"
+    "lastChecked": "2026-10-22T08:09:33.4408086+00:00"
   },
   "105600:105603": {
     "schemaVersion": "v1",
@@ -612,6 +612,6 @@
     "missingRevisions": 4,
     "coverageRatio": 0.2,
     "latestAvailableManifestId": 5312595479056093124,
-    "lastChecked": "2026-10-21T08:09:39.2871954+00:00"
+    "lastChecked": "2026-10-22T08:09:33.4415603+00:00"
   }
 }
