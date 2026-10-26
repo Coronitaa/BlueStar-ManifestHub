@@ -2,6 +2,31 @@
   {
     "schemaVersion": "v1",
     "appId": 10,
+    "buildId": 12,
+    "timestamp": "2023-12-12T00:24:33+00:00",
+    "creationTime": "2023-12-12T00:24:33+00:00",
+    "dateCertainty": "unknown",
+    "completeness": "complete",
+    "branch": "public",
+    "description": "Build snapshot 12 for App 10 (public)",
+    "depotManifests": {
+      "11": 3018093494972814332,
+      "95": 7685864384078520360,
+      "12": 7476629819067189879,
+      "13": 1596103708518313909,
+      "14": 4163740413628378088,
+      "15": 2951655054604220030,
+      "17": 8232848132911478974,
+      "18": 9210252686867714338,
+      "19": 5149037574830114753,
+      "142": 8052183366346984139
+    },
+    "patchDate": "2023-12-12",
+    "changedDepots": []
+  },
+  {
+    "schemaVersion": "v1",
+    "appId": 10,
     "buildId": 11,
     "timestamp": "2023-12-12T00:24:33+00:00",
     "creationTime": "2023-12-12T00:24:33+00:00",
